@@ -166,6 +166,7 @@ como secreto de Modal y protege el endpoint:
 ```bash
 cd "Calce y Matices Integrado"
 <<<<<<< HEAD
+<<<<<<< HEAD
 python3.11 -m pip install --user --upgrade modal fastapi
 python3.11 -m modal setup
 python3.11 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
@@ -179,6 +180,11 @@ modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
 python3 -m modal setup
 python3 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
 >>>>>>> 83c1420 (Actualizar instrucciones de configuración en README: agregar 'python3 -m' antes de los comandos de Modal)
+=======
+python3.11 -m pip install --user --upgrade modal fastapi
+python3.11 -m modal setup
+python3.11 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
+>>>>>>> f39d49d (Actualizar instrucciones en README para utilizar Python 3.11 en la instalación y configuración de Modal.)
 ```
 
 Después del despliegue, configura `VTON_API_URL` con la URL base permanente de
@@ -203,7 +209,7 @@ Para obtener una URL temporal que se actualiza al guardar cambios:
 python3.11 -m modal serve vton_api.py
 =======
 cd "Calce y Matices Integrado"
-python3 -m modal serve vton_api.py
+python3.11 -m modal serve vton_api.py
 ```
 
 Cuando la inferencia VTON real esté integrada y probada, detén el modo de
@@ -211,8 +217,12 @@ desarrollo con `Ctrl+C` y publica la API:
 
 ```bash
 cd "Calce y Matices Integrado"
+<<<<<<< HEAD
 python3 -m modal deploy vton_api.py
 >>>>>>> 83c1420 (Actualizar instrucciones de configuración en README: agregar 'python3 -m' antes de los comandos de Modal)
+=======
+python3.11 -m modal deploy vton_api.py
+>>>>>>> f39d49d (Actualizar instrucciones en README para utilizar Python 3.11 en la instalación y configuración de Modal.)
 ```
 
 Modal entrega una URL permanente con formato

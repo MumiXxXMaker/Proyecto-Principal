@@ -64,6 +64,7 @@ con Python 3.10 o posterior. Configura tu cuenta y crea un token de acceso:
 
 ```bash
 <<<<<<< HEAD
+<<<<<<< HEAD
 python3.11 -m pip install --user --upgrade modal fastapi
 python3.11 -m modal setup
 python3.11 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
@@ -77,17 +78,26 @@ modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
 python3 -m modal setup
 python3 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
 >>>>>>> 83c1420 (Actualizar instrucciones de configuración en README: agregar 'python3 -m' antes de los comandos de Modal)
+=======
+python3.11 -m pip install --user --upgrade modal fastapi
+python3.11 -m modal setup
+python3.11 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
+>>>>>>> f39d49d (Actualizar instrucciones en README para utilizar Python 3.11 en la instalación y configuración de Modal.)
 ```
 
 Descarga y prepara los pesos una vez antes de publicar la API:
 
 ```bash
 <<<<<<< HEAD
+<<<<<<< HEAD
 python3.11 -m modal run vton_api.py::prepare_weights
 python3.11 -m modal deploy vton_api.py
 =======
 python3 -m modal serve vton_api.py
 >>>>>>> 83c1420 (Actualizar instrucciones de configuración en README: agregar 'python3 -m' antes de los comandos de Modal)
+=======
+python3.11 -m modal serve vton_api.py
+>>>>>>> f39d49d (Actualizar instrucciones en README para utilizar Python 3.11 en la instalación y configuración de Modal.)
 ```
 
 La preparación descarga cerca de 2 GB del modelo VTON, los pesos de DWPose y
@@ -107,10 +117,14 @@ Para obtener una URL temporal que se actualiza al guardar cambios:
 
 ```bash
 <<<<<<< HEAD
+<<<<<<< HEAD
 python3.11 -m modal serve vton_api.py
 =======
 python3 -m modal deploy vton_api.py
 >>>>>>> 83c1420 (Actualizar instrucciones de configuración en README: agregar 'python3 -m' antes de los comandos de Modal)
+=======
+python3.11 -m modal deploy vton_api.py
+>>>>>>> f39d49d (Actualizar instrucciones en README para utilizar Python 3.11 en la instalación y configuración de Modal.)
 ```
 
 La URL permanente tendrá el formato
