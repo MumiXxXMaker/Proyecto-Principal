@@ -824,7 +824,6 @@ def _size_chart(perfil: PerfilMedidas) -> str:
     )
     return (
         '<section class="size-chart" aria-label="Tabla de medidas y tallas">'
-        '<div class="help-heading"><h3>Talla(s) según tabla estándar</h3></div>'
         '<div class="table-scroll"><table><thead><tr>'
         '<th scope="col">Talla alfa</th><th scope="col">Talla EU</th>'
         '<th scope="col">Talla EE.UU.</th>'
@@ -1517,7 +1516,11 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
     info_tab_query = dict(query)
     info_tab_query["view"] = "info"
     info_tab_url = "/?" + urlencode(info_tab_query)
-    auth_base_query = {"view": "account", "wizard_step": "2"}
+    auth_base_query = {
+        "view": "account",
+        "wizard_step": "2",
+        "return_view": "storefront",
+    }
     auth_base_query["auth_mode"] = "sign-in"
     sign_in_url = f"/?{urlencode(auth_base_query)}"
     auth_base_query["auth_mode"] = "sign-up"
@@ -1557,11 +1560,7 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         else ""
     )
     if not puede_recomendar:
-        results_panel_content = (
-            f'<a class="catalog-toggle" href="{escape(catalog_url, quote=True)}" '
-            'aria-controls="catalog-panel">'
-            "Abrir catálogo completo</a>"
-        )
+        results_panel_content = ""
     elif recomendaciones:
         slides = "".join(
             _render_product(prenda, resultado, indice, preferencia)

@@ -106,7 +106,6 @@
               <div class="matices-remember" id="matices-remember-row" hidden>
                 <label for="matices-remember"><input id="matices-remember" type="checkbox" disabled> Recordar foto en mi cuenta</label>
                 <span id="matices-remember-status" role="status" aria-live="polite"></span>
-                <small>Con una cuenta iniciada, la foto, las medidas y la paleta se guardan de forma privada y se recuperan al volver a entrar.</small>
               </div>
               <p id="matices-status" class="matices-status" aria-live="polite">La foto se analiza al presionar Siguiente.</p>
             </div>
@@ -128,8 +127,8 @@
                 <span id="remember-status" role="status" aria-live="polite"></span>
               </div>
               <div class="wizard-actions">
-                <button class="matices-button wizard-back" type="button" data-wizard-back>Volver a la foto</button>
-                <button class="matices-button matices-button-primary" type="button" data-wizard-next="3">Ver resumen</button>
+                <button class="matices-button wizard-back" type="button" data-wizard-back>Volver</button>
+                <button class="matices-button matices-button-primary" type="button" data-wizard-next="3">Siguiente</button>
               </div>
             </section>
           </section>
@@ -167,12 +166,11 @@
               </div>
             </section>
             <div class="wizard-actions">
-              <button class="matices-button wizard-back" type="button" data-wizard-back>Volver a las medidas</button>
+              <button class="matices-button wizard-back" type="button" data-wizard-back>Volver</button>
             </div>
             <div class="wizard-catalog-action">
-              <p class="sub">Al continuar, el catálogo usará tus medidas para estimar cómo podrían quedarte las prendas. Allí podrás filtrar, seleccionar y comparar varias opciones.</p>
               <button class="matices-button matices-button-primary" type="submit"
-                name="view" value="catalog">Cerrar asistente e ir al catálogo</button>
+                name="view" value="catalog">Finalizar</button>
             </div>
           </section>
         </form>
@@ -254,7 +252,6 @@
           <span class="variable-details-indicator" aria-hidden="true"></span>
         </summary>
         <div class="catalog-panel">
-          <h2 class="variable-details-title">14 detalles que cambian el calce</h2>
           <div class="variable-grid">{variables}</div>
         </div>
       </details>
@@ -332,6 +329,6 @@
       </div>
     </section>
   </div></main>
-  <script src="/app.js?v=wizard-35-aiuta-photo" defer></script>
+  <script src="/app.js?v=wizard-36-wizard-copy" defer></script>
 </body>
 </html>

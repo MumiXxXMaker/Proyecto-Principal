@@ -420,7 +420,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertRegex(
             wizard_page,
             r'<button class="matices-button matices-button-primary" type="submit"\s+'
-            r'name="view" value="catalog">Cerrar asistente e ir al catálogo</button>',
+            r'name="view" value="catalog">Finalizar</button>',
         )
 
         query = {
@@ -470,11 +470,24 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertIn('aria-label="Eliminar imagen"', photo_step)
         self.assertIn('id="matices-remember" type="checkbox"', photo_step)
+        self.assertNotIn(
+            "Con una cuenta iniciada, la foto, las medidas y la paleta",
+            photo_step,
+        )
         app_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn("indexedDB.open(rememberedPhotoDatabase, 1)", app_script)
         self.assertIn("restoreRememberedPhoto();", app_script)
         self.assertIn("No se pudo recuperar la foto guardada.", app_script)
         self.assertIn("No se pudo borrar la foto guardada.", app_script)
+        self.assertNotIn("Foto lista. Presiona Siguiente para analizarla.", app_script)
+        self.assertNotIn(
+            "Foto recuperada de tu cuenta y guardada en este navegador.",
+            app_script,
+        )
+        self.assertNotIn(
+            "Medidas y paleta guardadas de forma privada en Supabase.",
+            app_script,
+        )
         styles = (ROOT / "web" / "styles.css").read_text(encoding="utf-8")
         self.assertIn("aspect-ratio: 10 / 4;", styles)
         self.assertIn("object-fit: contain;", styles)
@@ -497,9 +510,7 @@ class ExcelCatalogTests(unittest.TestCase):
 
         self.assertIn("<summary", details_section)
         self.assertIn("Detrás de cada recomendación", details_section)
-        summary, content = details_section.split("</summary>", 1)
-        self.assertNotIn("14 detalles que cambian el calce", summary)
-        self.assertIn("14 detalles que cambian el calce", content)
+        self.assertNotIn("14 detalles que cambian el calce", details_section)
         self.assertIn('class="variable-grid"', details_section)
         self.assertNotIn("<details class=\"variable-details\" open>", page)
 
@@ -521,9 +532,9 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("Medidas corporales", measurement_step)
         self.assertIn('name="waist"', measurement_step)
         self.assertIn("Paso 3 de 3", summary_step)
-        self.assertIn('data-wizard-next="3">Ver resumen</button>', measurement_step)
-        self.assertIn("Volver a la foto", measurement_step)
-        self.assertIn("Volver a las medidas", summary_step)
+        self.assertIn('data-wizard-next="3">Siguiente</button>', measurement_step)
+        self.assertIn(">Volver</button>", measurement_step)
+        self.assertIn(">Volver</button>", summary_step)
         self.assertNotIn("Elige los colores que usarías", summary_step)
         self.assertNotIn('name="preferred_color"', summary_step)
         self.assertNotIn("Prendas más recomendadas", summary_step)
@@ -545,7 +556,13 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("2 · Medidas", page)
         self.assertIn("3 · Resumen", page)
         self.assertNotIn("Prendas a explorar", summary_step)
-        self.assertIn("Cerrar asistente e ir al catálogo", page)
+        self.assertIn(">Finalizar</button>", page)
+        self.assertNotIn(
+            "Al continuar, el catálogo usará tus medidas para estimar", summary_step
+        )
+        self.assertNotIn("Abrir catálogo completo", page)
+        self.assertNotIn("Talla(s) según tabla estándar", page)
+        self.assertNotIn("14 detalles que cambian el calce", page)
         self.assertIn(
             '<section class="results-panel wizard-page-results" '
             'aria-label="Resultados de calce">',
@@ -851,7 +868,7 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertNotIn("Ver recomendaciones", home_panel)
         self.assertNotIn("Coloca tus medidas", page)
-        self.assertIn("Abrir catálogo completo", page)
+        self.assertNotIn("Abrir catálogo completo", page)
         self.assertNotIn('name="brand"', page)
 
         filtered_page = renderizar_pagina({"category": "Blusa"})
@@ -1204,7 +1221,7 @@ class ExcelCatalogTests(unittest.TestCase):
 
         self.assertIn("Marcas con mejor coincidencia", page)
         self.assertIn("Tipo de ropa recomendado", page)
-        self.assertIn("Talla(s) según tabla estándar", page)
+        self.assertNotIn("Talla(s) según tabla estándar", page)
         self.assertIn(
             "La tabla estándar usa busto/pecho, cintura y cadera. El cálculo de "
             "calce de las prendas considera cintura y cadera, ya que las fichas "
@@ -1275,7 +1292,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertNotIn('id="measurement-length"', page)
         self.assertLess(
             page.index('class="size-chart"'),
-            page.index("14 detalles que cambian el calce"),
+            page.index('class="variable-grid"'),
         )
 
 

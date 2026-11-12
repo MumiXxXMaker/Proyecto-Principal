@@ -213,6 +213,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const profileEditLink = document.querySelector("[data-profile-edit]");
     const profileAccountLink = document.querySelector("[data-profile-account]");
     const profilePaymentLink = document.querySelector("[data-profile-payment]");
+    const navAccountLinks = document.querySelector(".nav-account-links");
     const profileName = document.querySelector("[data-profile-name]");
     const profileAvatar = document.querySelector("[data-profile-avatar]");
     const profileAvatarPreview = document.querySelector("[data-profile-avatar-preview]");
@@ -253,9 +254,10 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       profilePhoneInput, profileBustInput, profileWaistInput, profileHipInput,
     ].filter(Boolean);
     const requestedReturnView = new URLSearchParams(window.location.search).get("return_view");
-    let authReturnView = ["home", "try-on", "profile"].includes(requestedReturnView)
+    let authReturnView = ["storefront", "home", "try-on", "profile"].includes(requestedReturnView)
       ? requestedReturnView
-      : "home";
+      : "storefront";
+    let returnToHomeAfterSignIn = false;
     let authMode = new URLSearchParams(window.location.search).get("auth_mode") === "sign-up"
       ? "sign-up"
       : "sign-in";
@@ -273,6 +275,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       profilePaymentLink.hidden = !user;
       profileEmail.hidden = !user;
       profileEmail.textContent = user?.email || "Cuenta activa";
+      navAccountLinks.hidden = Boolean(user);
       profileFields.forEach(field => { field.disabled = !user; });
       if (rememberCheckbox) rememberCheckbox.disabled = !user;
       if (rememberPhotoInput) rememberPhotoInput.disabled = !user;
@@ -429,9 +432,6 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         savedProfileFirstName = firstName;
         savedProfileLastName = lastName;
         profileName.textContent = firstName || signedInUser.email || "Mi Perfil";
-      }
-      if (rememberMeasurements) {
-        showRememberStatus("Medidas y paleta guardadas de forma privada en Supabase.");
       }
       return true;
     };
@@ -654,6 +654,9 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       finishAuthStateInitialization(true);
       if (new URLSearchParams(window.location.search).get("view") === "account") {
         window.location.assign(`/?view=${authReturnView}`);
+      } else if (returnToHomeAfterSignIn) {
+        returnToHomeAfterSignIn = false;
+        window.location.assign("/?view=storefront");
       }
     };
     const credentials = () => {
@@ -685,6 +688,10 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     });
     document.querySelectorAll("[data-open-account]").forEach(link => {
       link.addEventListener("click", event => {
+        if (link.dataset.openAccount === "sign-in") {
+          authReturnView = "storefront";
+          returnToHomeAfterSignIn = true;
+        }
         const homePanel = document.querySelector('[data-page-panel="home"]');
         if (homePanel?.hidden) return;
         event.preventDefault();
@@ -1542,7 +1549,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       previewBox.hidden = false;
       rememberRow.hidden = false;
       nextButton.disabled = false;
-      setStatus("Foto lista. Presiona Siguiente para analizarla.");
+      setStatus("");
       if (persist) persistSelectedPhoto(file);
     };
     reader.onerror = () => {
@@ -2066,7 +2073,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     saveRememberedPhoto(file)
       .then(() => {
         showSelectedPhoto(file, false, false);
-        rememberStatus.textContent = "Foto recuperada de tu cuenta y guardada en este navegador.";
+        rememberStatus.textContent = "";
       })
       .catch(error => {
         showSelectedPhoto(file, false, false);
