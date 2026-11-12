@@ -63,9 +63,15 @@ Para ejecutarlo, instala el cliente Modal fuera de las dependencias de la app,
 con Python 3.10 o posterior. Configura tu cuenta y crea un token de acceso:
 
 ```bash
+<<<<<<< HEAD
 python3.11 -m pip install --user --upgrade modal fastapi
 python3.11 -m modal setup
 python3.11 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
+=======
+python3 -m pip install modal fastapi
+modal setup
+modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
+>>>>>>> da56ce1 (Refactor code structure for improved readability and maintainability)
 ```
 
 Descarga y prepara los pesos una vez antes de publicar la API:
