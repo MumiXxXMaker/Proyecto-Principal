@@ -502,15 +502,15 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertNotIn('<dialog id="style-wizard"', page)
         self.assertNotIn("data-wizard-reopen", page)
 
-    def test_fit_details_section_is_collapsible_and_closed_by_default(self):
+    def test_fit_details_section_is_in_info_not_home(self):
         page = renderizar_pagina({})
-        details_section = page.split(
+        home_page, info_page = page.split('<section id="info-panel"', 1)
+        details_section = info_page.split(
             '<details class="variable-details">', 1
         )[1].split("</details>", 1)[0]
 
-        self.assertIn("<summary", details_section)
+        self.assertNotIn("Detrás de cada recomendación", home_page)
         self.assertIn("Detrás de cada recomendación", details_section)
-        self.assertNotIn("14 detalles que cambian el calce", details_section)
         self.assertIn('class="variable-grid"', details_section)
         self.assertNotIn("<details class=\"variable-details\" open>", page)
 
@@ -523,6 +523,9 @@ class ExcelCatalogTests(unittest.TestCase):
             'data-wizard-panel="3"', 1
         )[0]
         summary_step = wizard.split('data-wizard-panel="3"', 1)[1]
+        summary_actions = summary_step.split(
+            '<div class="wizard-catalog-action">', 1
+        )[1].split("</div>", 1)[0]
 
         self.assertIn('aria-valuemax="3"', page)
         self.assertNotIn('wizard-palette-title', wizard)
@@ -535,6 +538,8 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('data-wizard-next="3">Siguiente</button>', measurement_step)
         self.assertIn(">Volver</button>", measurement_step)
         self.assertIn(">Volver</button>", summary_step)
+        self.assertIn(">Volver</button>", summary_actions)
+        self.assertIn(">Finalizar</button>", summary_actions)
         self.assertNotIn("Elige los colores que usarías", summary_step)
         self.assertNotIn('name="preferred_color"', summary_step)
         self.assertNotIn("Prendas más recomendadas", summary_step)
@@ -597,8 +602,17 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('id="supabase-email" type="email"', page)
         self.assertIn('data-supabase-sign-in', page)
         self.assertIn('data-supabase-sign-up', page)
+        self.assertIn('data-supabase-sign-up hidden>Crear cuenta</button>', page)
         self.assertIn('data-auth-mode="sign-in"', page)
         self.assertIn('data-auth-mode="sign-up"', page)
+        app_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn("authModeTabs.hidden = creatingAccount", app_script)
+        self.assertIn("button.classList.toggle(\"is-active\", isActive)", app_script)
+        remember_position = page.index('<label class="supabase-remember-session"')
+        auth_tabs_position = page.index('<div class="supabase-auth-tabs"')
+        submit_actions_position = page.index('<div class="supabase-auth-actions">')
+        self.assertLess(remember_position, auth_tabs_position)
+        self.assertLess(auth_tabs_position, submit_actions_position)
         self.assertIn('id="supabase-password-confirm"', page)
         self.assertIn('minlength="8"', page)
         self.assertIn(
@@ -651,11 +665,11 @@ class ExcelCatalogTests(unittest.TestCase):
             {"bust": "90", "waist": "74", "hip": "100"}
         )
         self.assertIn(
-            'href="/?view=account&amp;wizard_step=2&amp;auth_mode=sign-in"',
+            'href="/?view=account&amp;wizard_step=2&amp;return_view=storefront&amp;auth_mode=sign-in"',
             measured_page,
         )
         self.assertIn(
-            'href="/?view=account&amp;wizard_step=2&amp;auth_mode=sign-up"',
+            'href="/?view=account&amp;wizard_step=2&amp;return_view=storefront&amp;auth_mode=sign-up"',
             measured_page,
         )
         account_page = renderizar_pagina({"view": "account", "auth_mode": "sign-up"})
@@ -666,7 +680,28 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertNotIn('data-open-account="sign-in" aria-current="page"', account_page)
         self.assertIn('data-account-panel', account_page)
         self.assertIn('auth_mode=sign-up', account_page)
-        self.assertIn('data-account-back', account_page)
+        self.assertIn(
+            '<a class="account-home-button" href="/?view=storefront&amp;auth_mode=sign-up"',
+            account_page,
+        )
+        self.assertIn('aria-label="Volver a Home"', account_page)
+        self.assertNotIn("Volver a la guía", account_page)
+        self.assertIn(
+            '<h1 class="brandmark supabase-auth-logo" aria-label="Calce">',
+            account_page,
+        )
+        self.assertIn('src="/assets/calce-isotipo.png"', account_page)
+        self.assertNotIn("Tu estilo, siempre contigo", account_page)
+        self.assertNotIn("authDescription.textContent", app_script)
+        sign_in_page = renderizar_pagina(
+            {"view": "account", "auth_mode": "sign-in"}
+        )
+        self.assertIn('<h1 class="brandmark supabase-auth-logo"', sign_in_page)
+        self.assertIn(
+            '<a class="account-home-button" href="/?view=storefront&amp;auth_mode=sign-in"',
+            sign_in_page,
+        )
+        self.assertNotIn("Volver a la guía", sign_in_page)
 
         self.assertIn("Recordar medidas", page)
         self.assertIn("alter table public.user_profiles enable row level security", schema)
@@ -804,11 +839,28 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('id="storefront-title"', storefront_page)
         self.assertIn("Productos destacados", storefront_page)
         self.assertIn('data-page-panel="storefront"', storefront_page)
+        self.assertIn(
+            '<a class="matices-button" href="/?view=home">Tu Calce</a>',
+            storefront_page,
+        )
+        self.assertNotIn("Conocer mi calce", storefront_page)
         self.assertIn('data-page-panel="storefront" hidden', home_page)
         self.assertIn("Cómo comparamos las prendas", info_page)
         self.assertIn("0,2 × distancia media al objetivo", info_page)
+        info_content = info_page.split(
+            '<section id="info-panel"', 1
+        )[1].split('<section id="catalog-panel"', 1)[0]
+        self.assertIn(
+            '<h2 id="standard-size-table-title">Tabla estándar de tallas</h2>',
+            info_content,
+        )
+        self.assertIn("<th scope=\"col\">Busto / pecho (cm)</th>", info_content)
+        self.assertIn("<td>82-86</td>", info_content)
         self.assertIn('href="/?view=info" aria-current="page">Info</a>', info_page)
-        self.assertIn('href="/?view=catalog" aria-current="page">Catálogo</a>', catalog_page)
+        self.assertIn(
+            'href="/?view=catalog&amp;preference=regular" aria-current="page">Catálogo</a>',
+            catalog_page,
+        )
         self.assertNotIn('role="tablist"', home_page)
         self.assertNotIn('data-page-tab-link', home_page)
         self.assertIn('data-page-panel="catalog"', home_page)
@@ -910,10 +962,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("Talla publicada:", store_section)
         self.assertIn("Referencia estimada:", store_section)
         self.assertIn("Ver medidas comparadas", store_section)
-        self.assertLess(
-            page.index('id="store-listing-recommendations"'),
-            page.index('class="size-chart"'),
-        )
+        self.assertNotIn('class="size-chart"', page)
 
     def test_home_store_recommendations_respect_selected_garment_category(self):
         page = renderizar_pagina(
@@ -964,7 +1013,7 @@ class ExcelCatalogTests(unittest.TestCase):
             self.assertNotIn("Jeans · Fit", alternative_section)
             self.assertNotIn("Pantalon · Fit", alternative_section)
 
-    def test_alternative_fit_carousel_precedes_size_table_and_excludes_main_filter(self):
+    def test_alternative_fit_carousel_excludes_main_filter_without_size_table(self):
         page = renderizar_pagina(
             {
                 "bust": "85",
@@ -980,10 +1029,7 @@ class ExcelCatalogTests(unittest.TestCase):
             page,
         )
         self.assertIn("Holgura al límite", page)
-        self.assertLess(
-            page.index('id="alternative-recommendations"'),
-            page.index('class="size-chart"'),
-        )
+        self.assertNotIn('class="size-chart"', page)
         alternative_section = page.split(
             'id="alternative-recommendations"', 1
         )[1].split("</section>", 1)[0]
@@ -1012,7 +1058,7 @@ class ExcelCatalogTests(unittest.TestCase):
             )
         )
 
-    def test_fit_detail_boxes_are_ordered_by_declared_importance(self):
+    def test_fit_information_factors_remain_ordered_by_declared_importance(self):
         page = renderizar_pagina({})
         impacts = re.findall(r'class="impact ([^"]+)"', page)
 
@@ -1157,7 +1203,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIsNone(profile.cadera)
         self.assertEqual(profile.largo, 65)
 
-    def test_standard_size_chart_is_loaded_and_recommends_matching_size(self):
+    def test_standard_size_reference_is_loaded_and_recommends_matching_size(self):
         sizes = RepositorioTallasEstandar(STANDARD_SIZES).cargar()
         recommended, exact_match = recomendar_tallas(
             PerfilMedidas(busto=87, cintura=68, cadera=95), sizes
@@ -1188,7 +1234,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertEqual([size.etiqueta for size in recommended], ["S"])
         self.assertTrue(exact_match)
 
-    def test_standard_size_chart_reports_closest_size_when_measures_conflict(self):
+    def test_standard_size_reference_reports_closest_size_when_measures_conflict(self):
         sizes = RepositorioTallasEstandar(STANDARD_SIZES).cargar()
         recommended, exact_match = recomendar_tallas(
             PerfilMedidas(busto=80, cintura=98, cadera=124), sizes
@@ -1200,7 +1246,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("Son las tallas más cercanas.", page)
         self.assertNotIn("tus medidas no coinciden todas con un mismo rango", page)
 
-    def test_bust_alone_selects_size_and_is_shown_in_the_standard_table(self):
+    def test_bust_alone_selects_size_without_rendering_the_standard_table(self):
         sizes = RepositorioTallasEstandar(STANDARD_SIZES).cargar()
         recommended, exact_match = recomendar_tallas(
             PerfilMedidas(busto=84), sizes
@@ -1209,12 +1255,11 @@ class ExcelCatalogTests(unittest.TestCase):
 
         self.assertEqual([size.etiqueta for size in recommended], ["XS"])
         self.assertTrue(exact_match)
-        self.assertIn(
-            '<tr class="recommended-size"><th scope="row">XS</th>', page
-        )
-        self.assertIn("<td>82-86</td>", page)
+        self.assertIn('data-size-label="XS"', page)
+        self.assertIn('data-size-bust-min="82.0"', page)
+        self.assertNotIn('class="size-chart"', page)
 
-    def test_page_renders_recommendations_measurement_guidance_and_size_chart(self):
+    def test_page_renders_recommendations_without_the_standard_size_table(self):
         page = renderizar_pagina(
             {"bust": "85", "waist": "67", "hip": "93", "brand": "Zara"}
         )
@@ -1223,7 +1268,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("Tipo de ropa recomendado", page)
         self.assertNotIn("Talla(s) según tabla estándar", page)
         self.assertIn(
-            "La tabla estándar usa busto/pecho, cintura y cadera. El cálculo de "
+            "La talla se estima con busto/pecho, cintura y cadera. El cálculo de "
             "calce de las prendas considera cintura y cadera, ya que las fichas "
             "importadas de Vestua no publican medidas físicas exactas.</span>",
             page,
@@ -1232,7 +1277,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('data-size-bust-min="76.0"', page)
         self.assertIn('data-size-waist-max="62.0"', page)
         self.assertIn('data-size-hip-max="88.0"', page)
-        self.assertIn("Tallas según tabla estándar", page)
+        self.assertIn("<summary>Tallas estimadas</summary>", page)
         self.assertIn('data-palette-summary-colors', page)
         self.assertNotIn(
             '<p class="sub">Filtra por marca o tipo de prenda para comparar',
@@ -1240,13 +1285,16 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertIn("<strong>S (EU 36/38) (EE.UU. 4/6)</strong>", page)
         self.assertNotIn("Tabla Estándar de Tallas", page)
-        self.assertIn('<section class="size-chart"', page)
-        self.assertIn("<th scope=\"col\">Talla alfa</th>", page)
+        self.assertNotIn('class="size-chart"', page)
+        self.assertIn(
+            '<div class="eyebrow">Detrás de cada recomendación</div>',
+            page.split('<section id="info-panel"', 1)[1],
+        )
         self.assertNotIn("Medidas corporales en centímetros", page)
         self.assertNotIn("El archivo adjunto no contiene tablas oficiales por marca", page)
         self.assertNotIn("Esta referencia estándar no garantiza equivalencia con una marca", page)
-        self.assertIn("Talla EU", page)
-        self.assertIn('<th scope="col">Talla EE.UU.</th>', page)
+        self.assertIn('data-size-eu="30/32"', page)
+        self.assertIn('data-size-us="00/0"', page)
         for size, us_size in (
             ("XXS", "00/0"),
             ("XS", "2/4"),
@@ -1256,16 +1304,8 @@ class ExcelCatalogTests(unittest.TestCase):
             ("XL", "16/18"),
             ("XXL", "20/22"),
         ):
-            self.assertIn(
-                f'<th scope="row">{size}</th><td>',
-                page,
-            )
-            row_start = page.index(f'<th scope="row">{size}</th>')
-            row_end = page.index("</tr>", row_start)
-            self.assertIn(f"<td>{us_size}</td>", page[row_start:row_end])
-        self.assertIn("Busto / pecho (cm)", page)
-        self.assertIn("Cintura (cm)", page)
-        self.assertIn("Cadera (cm)", page)
+            self.assertIn(f'data-size-label="{size}"', page)
+            self.assertIn(f'data-size-us="{us_size}"', page)
         self.assertIn('id="measurement-bust"', page)
         self.assertIn("parte más amplia del pecho", page)
         self.assertNotIn("Ver catálogo completo", page)
@@ -1290,10 +1330,7 @@ class ExcelCatalogTests(unittest.TestCase):
         for field in ("bust", "waist", "hip"):
             self.assertIn(f'id="measurement-{field}"', page)
         self.assertNotIn('id="measurement-length"', page)
-        self.assertLess(
-            page.index('class="size-chart"'),
-            page.index('class="variable-grid"'),
-        )
+        self.assertIn('data-standard-size-ranges hidden', page)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@
   <meta name="supabase-url" content="{supabase_url}">
   <meta name="supabase-publishable-key" content="{supabase_publishable_key}">
   <title>Calce — recomendaciones por medidas</title>
-  <link rel="stylesheet" href="/styles.css?v=brand-home-1">
+  <link rel="stylesheet" href="/styles.css?v=info-details-original-1">
 </head>
 <body>
   <header><div class="wrap nav">
@@ -32,7 +32,9 @@
       </div>
       <details class="profile-menu" data-profile-menu hidden>
         <summary aria-label="Abrir menú de perfil">
-          <span class="profile-menu-avatar" data-profile-avatar-fallback aria-hidden="true">c</span>
+          <img class="profile-menu-avatar profile-menu-avatar-image"
+            data-profile-avatar-fallback src="/assets/profile-avatar-default.jpeg"
+            alt="" aria-hidden="true">
           <img class="profile-menu-avatar profile-menu-avatar-image" data-profile-avatar
             alt="" hidden>
           <span data-profile-name>Mi Perfil</span>
@@ -151,7 +153,7 @@
                   </div>
                 </details>
                 <details class="wizard-summary-details" data-size-summary open>
-                  <summary>Tallas según tabla estándar</summary>
+                  <summary>Tallas estimadas</summary>
                   <div class="wizard-summary-content">
                     <p class="wizard-summary-status" data-size-summary-status>
                       Completa tus medidas para consultar tallas compatibles o cercanas.
@@ -159,43 +161,33 @@
                     <div class="wizard-summary-sizes" data-size-summary-sizes></div>
                     <ul class="wizard-summary-measures" data-size-summary-measures></ul>
                     <p class="wizard-summary-note">
-                      Estimación basada en busto, cintura y cadera; consulta la tabla estándar completa al final de esta página.
+                      Estimación basada en busto, cintura y cadera.
                     </p>
                   </div>
                 </details>
               </div>
             </section>
-            <div class="wizard-actions">
-              <button class="matices-button wizard-back" type="button" data-wizard-back>Volver</button>
-            </div>
             <div class="wizard-catalog-action">
+              <button class="matices-button wizard-back" type="button" data-wizard-back>Volver</button>
               <button class="matices-button matices-button-primary" type="submit"
                 name="view" value="catalog">Finalizar</button>
             </div>
           </section>
         </form>
         <section class="supabase-account supabase-account-page" data-account-panel
-          aria-labelledby="supabase-account-title" hidden>
-          <div class="wizard-step-heading">
-            <span class="eyebrow">Cuenta personal</span>
-            <h2 id="supabase-account-title">Tu cuenta personal</h2>
-            <p class="sub">Sincroniza de forma privada tus medidas y paleta.</p>
-          </div>
-          <div class="supabase-auth-brand">
-            <span class="supabase-auth-mark" aria-hidden="true">c</span>
-            <div>
-              <span class="eyebrow">Calce · Matices</span>
-              <h3>Tu estilo, siempre contigo</h3>
-            </div>
-          </div>
-          <p class="sub" data-auth-description>Inicia sesión para sincronizar de forma privada tus medidas y paleta.</p>
+          aria-label="Acceso a tu cuenta" hidden>
+          <a class="account-home-button" href="{storefront_url}"
+            aria-label="Volver a Home" title="Volver a Home">
+            <span aria-hidden="true">←</span>
+          </a>
+          <h1 class="brandmark supabase-auth-logo" aria-label="Calce">
+            <img src="/assets/calce-isotipo.png" alt="">
+            <span class="brandmark-copy">
+              <span class="brandmark-name">calce</span>
+              <span class="brandmark-tagline">PROBADOR ONLINE</span>
+            </span>
+          </h1>
           <div class="supabase-auth-form" data-supabase-auth-form>
-            <div class="supabase-auth-tabs" role="group" aria-label="Tipo de acceso">
-              <button class="supabase-auth-tab is-active" type="button"
-                data-auth-mode="sign-in" aria-pressed="true">Iniciar sesión</button>
-              <button class="supabase-auth-tab" type="button"
-                data-auth-mode="sign-up" aria-pressed="false">Crear cuenta</button>
-            </div>
             <div class="supabase-auth-fields">
               <label class="supabase-sign-up-only" data-sign-up-only for="supabase-name" hidden>
                 Nombre
@@ -225,17 +217,20 @@
               <input id="supabase-remember-session" type="checkbox">
               <span>Recordar</span>
             </label>
+            <div class="supabase-auth-tabs" role="group" aria-label="Tipo de acceso">
+              <button class="supabase-auth-tab is-active" type="button"
+                data-auth-mode="sign-in" aria-pressed="true">Iniciar sesión</button>
+              <button class="supabase-auth-tab" type="button"
+                data-auth-mode="sign-up" aria-pressed="false">Crear cuenta</button>
+            </div>
             <div class="supabase-auth-actions">
               <button class="matices-button matices-button-primary" type="button"
                 data-supabase-sign-in>Iniciar sesión</button>
               <button class="matices-button matices-button-primary" type="button"
-                data-supabase-sign-up hidden>Crear cuenta gratis</button>
+                data-supabase-sign-up hidden>Crear cuenta</button>
             </div>
           </div>
           <p id="supabase-auth-status" role="status" aria-live="polite"></p>
-          <div class="wizard-actions wizard-actions-end">
-            <button class="matices-button" type="button" data-account-back>Volver a la guía</button>
-          </div>
         </section>
       </div>
     </section>
@@ -244,18 +239,7 @@
     </section>
     {alternative_recommendations}
     {store_recommendations}
-    {size_chart}
-    <section class="section">
-      <details class="variable-details">
-        <summary class="section-title variable-details-summary">
-          <div class="eyebrow">Detrás de cada recomendación</div>
-          <span class="variable-details-indicator" aria-hidden="true"></span>
-        </summary>
-        <div class="catalog-panel">
-          <div class="variable-grid">{variables}</div>
-        </div>
-      </details>
-    </section>
+    {size_ranges}
     </div>
     <section id="info-panel" data-page-panel="info"{info_panel_hidden}
       aria-labelledby="fit-info-title">
@@ -269,15 +253,15 @@
     </section>
     <section id="profile-panel" data-page-panel="profile"{profile_panel_hidden}>
       <div class="profile-page" data-profile-page>
-        <header class="profile-page-heading">
-          <span class="eyebrow">Mi Perfil</span>
-          <h1>Datos de Cuenta</h1>
-        </header>
         <section id="profile-account-data" class="profile-card"
           aria-labelledby="profile-account-title">
-          <h2 id="profile-account-title">Datos de Cuenta</h2>
+          <header class="profile-page-heading">
+            <span class="eyebrow">Mi Perfil</span>
+            <h1 id="profile-account-title">Datos de Cuenta</h1>
+          </header>
           <div class="profile-avatar-editor">
-            <span class="profile-avatar-fallback" data-profile-avatar-fallback aria-hidden="true">c</span>
+            <img class="profile-avatar-fallback" data-profile-avatar-fallback
+              src="/assets/profile-avatar-default.jpeg" alt="" aria-hidden="true">
             <img data-profile-avatar-preview alt="Foto de perfil" hidden>
             <label class="matices-button profile-avatar-button" for="profile-avatar-input">
               Cambiar foto de perfil
@@ -329,6 +313,6 @@
       </div>
     </section>
   </div></main>
-  <script src="/app.js?v=wizard-36-wizard-copy" defer></script>
+  <script src="/app.js?v=auth-signup-menu-2" defer></script>
 </body>
 </html>

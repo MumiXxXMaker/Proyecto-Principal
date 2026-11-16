@@ -405,7 +405,7 @@ def _personal_recommendations(
         'aria-label="Ayuda sobre recomendaciones según tus medidas" '
         'aria-describedby="recommendations-help">?</button>'
         '<span class="measurement-tooltip" id="recommendations-help" role="tooltip">'
-        "La tabla estándar usa busto/pecho, cintura y cadera. El cálculo de "
+        "La talla se estima con busto/pecho, cintura y cadera. El cálculo de "
         "calce de las prendas considera cintura y cadera, ya que las fichas "
         "importadas de Vestua no publican medidas físicas exactas.</span></div>"
         f"{summary}"
@@ -796,42 +796,23 @@ def _catalog_recommendations(
     ))
 
 
-def _size_chart(perfil: PerfilMedidas) -> str:
-    recomendadas, _ = recomendar_tallas(perfil, STANDARD_SIZES)
-    tallas_recomendadas = {talla.etiqueta for talla in recomendadas}
-    rows = "".join(
+def _size_ranges() -> str:
+    ranges = "".join(
         (
-            '<tr class="recommended-size">'
-            if talla.etiqueta in tallas_recomendadas
-            else "<tr>"
-        )
-        + f"<th scope=\"row\">{escape(talla.etiqueta)}</th>"
-        + f"<td>{escape(talla.europea or '—')}</td>"
-        + f"<td>{escape(talla.estadounidense or '—')}</td>"
-        + f"<td>{escape(talla.busto)}</td>"
-        + f"<td>{escape(talla.cintura)}</td>"
-        + (
-            '<td data-standard-size '
+            '<span data-standard-size '
+            f'data-size-label="{escape(talla.etiqueta, quote=True)}" '
+            f'data-size-eu="{escape(talla.europea or "", quote=True)}" '
+            f'data-size-us="{escape(talla.estadounidense or "", quote=True)}" '
             f'data-size-bust-min="{talla.limites("busto")[0]}" '
             f'data-size-bust-max="{talla.limites("busto")[1]}" '
             f'data-size-waist-min="{talla.limites("cintura")[0]}" '
             f'data-size-waist-max="{talla.limites("cintura")[1]}" '
             f'data-size-hip-min="{talla.limites("cadera")[0]}" '
-            f'data-size-hip-max="{talla.limites("cadera")[1]}">'
-            f'{escape(talla.cadera)}</td></tr>'
+            f'data-size-hip-max="{talla.limites("cadera")[1]}"></span>'
         )
         for talla in STANDARD_SIZES
     )
-    return (
-        '<section class="size-chart" aria-label="Tabla de medidas y tallas">'
-        '<div class="table-scroll"><table><thead><tr>'
-        '<th scope="col">Talla alfa</th><th scope="col">Talla EU</th>'
-        '<th scope="col">Talla EE.UU.</th>'
-        '<th scope="col">Busto / pecho (cm)</th>'
-        '<th scope="col">Cintura (cm)</th><th scope="col">Cadera (cm)</th>'
-        '</tr></thead>'
-        f"<tbody>{rows}</tbody></table></div></section>"
-    )
+    return f'<div data-standard-size-ranges hidden>{ranges}</div>'
 
 
 def _format_measure(value: Optional[float]) -> str:
@@ -1325,7 +1306,7 @@ def _storefront_content() -> str:
           <p>Explora prendas, descubre nuevos favoritos y encuentra referencias que te ayuden a elegir con más confianza.</p>
           <div class="storefront-hero-actions">
             <a class="matices-button matices-button-primary" href="/?view=catalog">Explorar prendas</a>
-            <a class="matices-button" href="/?view=home">Conocer mi calce</a>
+            <a class="matices-button" href="/?view=home">Tu Calce</a>
           </div>
         </div>
         {hero_image}
@@ -1361,7 +1342,7 @@ def _storefront_content() -> str:
     </div>"""
 
 
-def _fit_information_content(size_chart: str) -> str:
+def _fit_information_content() -> str:
     preference_labels = {
         "adjusted": "Ajustado",
         "regular": "Regular",
@@ -1372,10 +1353,21 @@ def _fit_information_content(size_chart: str) -> str:
         f"<td>{minimum:g} a {maximum:g} cm</td><td>{target:g} cm</td></tr>"
         for key, (minimum, maximum, target) in PREFERENCIAS_CALCE.items()
     )
-    factors = "".join(
-        f"""<article class="fit-info-factor">
-          <span>{escape(category)} · {escape(impact)}</span>
-          <h3>{escape(name)}</h3><p>{escape(description)}</p>
+    size_rows = "".join(
+        f"<tr><th scope=\"row\">{escape(talla.etiqueta)}</th>"
+        f"<td>{escape(talla.europea or '—')}</td>"
+        f"<td>{escape(talla.estadounidense or '—')}</td>"
+        f"<td>{escape(talla.busto)}</td>"
+        f"<td>{escape(talla.cintura)}</td>"
+        f"<td>{escape(talla.cadera)}</td></tr>"
+        for talla in STANDARD_SIZES
+    )
+    variables = "".join(
+        f"""<article class="variable">
+          <div class="variable-top"><strong>{escape(name)}</strong>
+            <span class="impact {escape(impact.lower().replace(' ', '-'))}">{escape(impact)}</span></div>
+          <span class="variable-category">{escape(category)}</span>
+          <p>{escape(description)}</p>
         </article>"""
         for category, name, description, impact in sorted(
             VARIABLES,
@@ -1392,11 +1384,21 @@ def _fit_information_content(size_chart: str) -> str:
       </div>
       <section class="fit-info-overview" aria-label="Resumen del cálculo">
         <article><span>01</span><h2>Cintura y cadera</h2>
-          <p>Son las medidas corporales que se comparan para calcular el ajuste. El busto se consulta aparte en la tabla estándar de tallas.</p></article>
+          <p>Son las medidas corporales que se comparan para calcular el ajuste. El busto se considera al estimar tallas.</p></article>
         <article><span>02</span><h2>Holgura</h2>
           <p>Se calcula restando la medida corporal a la medida de la prenda. Un valor positivo indica espacio; uno negativo, que la prenda mide menos.</p></article>
         <article><span>03</span><h2>Menor puntaje</h2>
           <p>Entre referencias comparables, un puntaje menor aparece primero. Con medidas incompletas, el diagnóstico es parcial.</p></article>
+      </section>
+      <section class="fit-info-panel" aria-labelledby="standard-size-table-title">
+        <h2 id="standard-size-table-title">Tabla estándar de tallas</h2>
+        <p>Rangos orientativos en centímetros. Las equivalencias pueden variar entre marcas.</p>
+        <div class="table-scroll"><table class="fit-info-table standard-size-table">
+          <thead><tr><th scope="col">Talla alfa</th><th scope="col">Talla EU</th>
+            <th scope="col">Talla EE.UU.</th><th scope="col">Busto / pecho (cm)</th>
+            <th scope="col">Cintura (cm)</th><th scope="col">Cadera (cm)</th></tr></thead>
+          <tbody>{size_rows}</tbody>
+        </table></div>
       </section>
       <section class="fit-info-panel">
         <h2>Rangos orientativos de holgura</h2>
@@ -1415,11 +1417,16 @@ def _fit_information_content(size_chart: str) -> str:
         <h2>Cómo interpretar el diagnóstico</h2>
         <p>“Podría quedarte bien” indica que las medidas están dentro del rango. Los estados de límite consideran la tolerancia de la referencia; si falta cintura o cadera, la revisión será parcial.</p>
       </section>
-      <section class="fit-info-panel">{size_chart}</section>
-      <section class="fit-info-panel">
-        <h2>Factores de la matriz de referencia</h2>
-        <p>La etiqueta indica el nivel informativo de impacto y no es un multiplicador adicional del puntaje.</p>
-        <div class="fit-info-factors">{factors}</div>
+      <section class="section">
+        <details class="variable-details">
+          <summary class="section-title variable-details-summary">
+            <div class="eyebrow">Detrás de cada recomendación</div>
+            <span class="variable-details-indicator" aria-hidden="true"></span>
+          </summary>
+          <div class="catalog-panel">
+            <div class="variable-grid">{variables}</div>
+          </div>
+        </details>
       </section>
     </div>"""
 
@@ -1484,18 +1491,6 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         ),
         key=lambda elemento: elemento[1].puntuacion,
     )
-    variables = "".join(
-        f"""<article class="variable">
-          <div class="variable-top"><strong>{escape(nombre)}</strong>
-            <span class="impact {escape(impacto.lower().replace(' ', '-'))}">{escape(impacto)}</span></div>
-          <span class="variable-category">{escape(grupo)}</span>
-          <p>{escape(descripcion)}</p>
-        </article>"""
-        for grupo, nombre, descripcion, impacto in sorted(
-            VARIABLES,
-            key=lambda variable: IMPACT_PRIORITY.get(variable[3], len(IMPACT_PRIORITY)),
-        )
-    )
     catalog_query = {"view": "catalog", "preference": preferencia}
     for measurement in ("bust", "waist", "hip"):
         if query.get(measurement):
@@ -1509,6 +1504,7 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
     home_tab_url = "/?" + urlencode(home_tab_query)
     catalog_tab_query = dict(query)
     catalog_tab_query["view"] = "catalog"
+    catalog_tab_query.setdefault("preference", preferencia)
     catalog_tab_url = f"/?{urlencode(catalog_tab_query)}"
     try_on_tab_query = dict(query)
     try_on_tab_query["view"] = "try-on"
@@ -1546,9 +1542,8 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         CATEGORY_GROUPS.get(grupo_categoria)
         or ((categoria,) if categoria else None),
     )
-    size_chart = _size_chart(perfil)
     storefront_content = _storefront_content()
-    fit_information_content = _fit_information_content(size_chart)
+    fit_information_content = _fit_information_content()
     results_heading = (
         '<div class="results-head">'
         '<div><h2>Tus mejores opciones</h2>'
@@ -1633,8 +1628,7 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         aiuta_try_on_panel=aiuta_try_on_panel,
         storefront_content=storefront_content,
         fit_information_content=fit_information_content,
-        size_chart=size_chart,
-        variables=variables,
+        size_ranges=_size_ranges(),
         storefront_url=escape(storefront_tab_url, quote=True),
         home_tab_url=escape(home_tab_url, quote=True),
         catalog_tab_url=escape(catalog_tab_url, quote=True),

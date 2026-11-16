@@ -202,7 +202,6 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const rememberSessionRow = document.querySelector("[data-remember-session-row]");
     const rememberPhotoInput = document.getElementById("matices-remember");
     const confirmPasswordLabel = document.querySelector(".supabase-confirm-password");
-    const authDescription = document.querySelector("[data-auth-description]");
     const authForm = document.querySelector("[data-supabase-auth-form]");
     const authModeButtons = Array.from(document.querySelectorAll("[data-auth-mode]"));
     const signInButton = document.querySelector("[data-supabase-sign-in]");
@@ -308,6 +307,17 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         button.disabled = Boolean(user);
       });
     };
+    const redirectUnauthenticatedView = () => {
+      const view = new URLSearchParams(window.location.search).get("view");
+      if (!["home", "try-on", "profile"].includes(view)) return;
+      authReturnView = view;
+      const accountQuery = new URLSearchParams({
+        view: "account",
+        auth_mode: "sign-in",
+        return_view: view,
+      });
+      window.location.replace(`/?${accountQuery}`);
+    };
     const setAuthMode = mode => {
       authMode = mode;
       const creatingAccount = mode === "sign-up";
@@ -338,9 +348,6 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       signInButton.hidden = creatingAccount;
       signUpButton.hidden = !creatingAccount;
       passwordInput.autocomplete = creatingAccount ? "new-password" : "current-password";
-      authDescription.textContent = creatingAccount
-        ? "Crea tu cuenta para conservar tus medidas y paleta en tus próximos dispositivos."
-        : "Inicia sesión para sincronizar de forma privada tus medidas y paleta.";
     };
     const authStorage = {
       getItem: async key => {
@@ -625,13 +632,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         localStorage.removeItem(rememberedValuesKey);
         showAccountStatus("Inicia sesión para sincronizar de forma privada tus medidas y paleta.");
         finishAuthStateInitialization(false);
-        const view = new URLSearchParams(window.location.search).get("view");
-        if (["home", "try-on", "profile"].includes(view)) {
-          authReturnView = view;
-          window.location.replace(
-            `/?view=account&auth_mode=sign-in&return_view=${view}`,
-          );
-        }
+        redirectUnauthenticatedView();
         return;
       }
       showAccountStatus(`Sesión iniciada como ${user.email || "usuario"}. Recuperando perfil…`);
@@ -955,6 +956,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       signOutButton.hidden = true;
       showAccountStatus("Falta configurar SUPABASE_PUBLISHABLE_KEY en el entorno del servidor.");
       finishAuthStateInitialization(false);
+      redirectUnauthenticatedView();
     } else {
       signInButton.disabled = true;
       signUpButton.disabled = true;
@@ -990,6 +992,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
           signUpButton.disabled = true;
           showAccountStatus(`No se pudo conectar con Supabase: ${error.message}`);
           finishAuthStateInitialization(false);
+          redirectUnauthenticatedView();
           console.error("No se pudo inicializar Supabase.", error);
         });
     }
@@ -1675,9 +1678,6 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   window.addEventListener("calce:open-account", () => {
     showAccount();
   });
-  accountPanel?.querySelector("[data-account-back]")?.addEventListener("click", () => {
-    showStep(currentStep);
-  });
 
   const rgbToHex = (r, g, b) => [r, g, b].map(value => value.toString(16).padStart(2, "0")).join("").toUpperCase();
 
@@ -1749,45 +1749,42 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       return;
     }
 
-    const rows = Array.from(document.querySelectorAll(".size-chart tbody tr"))
-      .filter(row => row.querySelector("[data-standard-size]"));
-    const rangesFor = row => enteredMeasures.map(({ value, rangeKey }) => {
-      const cell = row.querySelector("[data-standard-size]");
-      const minimum = Number(cell?.dataset[`size${rangeKey}Min`]);
-      const maximum = Number(cell?.dataset[`size${rangeKey}Max`]);
+    const sizes = Array.from(document.querySelectorAll("[data-standard-size]"));
+    const rangesFor = size => enteredMeasures.map(({ value, rangeKey }) => {
+      const minimum = Number(size.dataset[`size${rangeKey}Min`]);
+      const maximum = Number(size.dataset[`size${rangeKey}Max`]);
       return {
         compatible: value >= minimum && value <= maximum,
         distance: Math.max(minimum - value, value - maximum, 0),
       };
     });
-    const exactRows = rows.filter(row => rangesFor(row).every(range => range.compatible));
-    const closestRows = exactRows.length
-      ? exactRows
-      : rows.filter(row => {
-        const distance = rangesFor(row).reduce((total, range) => total + range.distance, 0);
+    const exactSizes = sizes.filter(size => rangesFor(size).every(range => range.compatible));
+    const closestSizes = exactSizes.length
+      ? exactSizes
+      : sizes.filter(size => {
+        const distance = rangesFor(size).reduce((total, range) => total + range.distance, 0);
         const minimumDistance = Math.min(
-          ...rows.map(candidate => rangesFor(candidate)
+          ...sizes.map(candidate => rangesFor(candidate)
             .reduce((total, range) => total + range.distance, 0)),
         );
         return Math.abs(distance - minimumDistance) < 1e-9;
       });
 
-    if (!closestRows.length) {
-      sizeSummaryStatus.textContent = "No se pudo consultar la tabla estándar de tallas.";
+    if (!closestSizes.length) {
+      sizeSummaryStatus.textContent = "No se pudieron estimar tallas con estas medidas.";
       return;
     }
 
-    sizeSummaryStatus.textContent = exactRows.length
+    sizeSummaryStatus.textContent = exactSizes.length
       ? "Tallas compatibles con las medidas ingresadas:"
       : "Tallas más cercanas; tus medidas no coinciden todas con un mismo rango:";
-    closestRows.forEach(row => {
-      const cells = row.querySelectorAll("th, td");
+    closestSizes.forEach(sizeData => {
       const size = document.createElement("span");
       size.className = "wizard-summary-size";
       size.textContent = [
-        cells[0]?.textContent.trim(),
-        cells[1]?.textContent.trim() && `EU ${cells[1].textContent.trim()}`,
-        cells[2]?.textContent.trim() && `EE. UU. ${cells[2].textContent.trim()}`,
+        sizeData.dataset.sizeLabel,
+        sizeData.dataset.sizeEu && `EU ${sizeData.dataset.sizeEu}`,
+        sizeData.dataset.sizeUs && `EE. UU. ${sizeData.dataset.sizeUs}`,
       ].filter(Boolean).join(" · ");
       sizeSummarySizes.append(size);
     });

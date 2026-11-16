@@ -20,6 +20,22 @@ PREFERENCIAS_CALCE = {
     "regular": (2, 8, 5),
     "loose": (6, 14, 10),
 }
+PESO_PUNTAJE_DESVIACION = 2
+PESO_PUNTAJE_OBJETIVO = 0.2
+UMBRAL_ELASTICIDAD_ALTA = 8
+HOLGURA_MINIMA_ELASTICA = -1
+
+
+def holgura_minima_efectiva(preferencia: str, elasticidad: float) -> float:
+    minimo, _, _ = PREFERENCIAS_CALCE.get(
+        preferencia, PREFERENCIAS_CALCE["regular"]
+    )
+    minimo_elastico = (
+        HOLGURA_MINIMA_ELASTICA
+        if elasticidad >= UMBRAL_ELASTICIDAD_ALTA
+        else 0
+    )
+    return max(minimo, minimo_elastico)
 
 
 class CalculadoraCalce:
@@ -52,10 +68,10 @@ class CalculadoraCalce:
             for clave in claves
         )
         ingresadas = tuple(medida for medida in medidas if medida.holgura is not None)
-        minimo, maximo, objetivo = PREFERENCIAS_CALCE.get(
+        _, maximo, objetivo = PREFERENCIAS_CALCE.get(
             preferencia, PREFERENCIAS_CALCE["regular"]
         )
-        minimo_efectivo = max(minimo, -1 if prenda.elasticidad >= 8 else 0)
+        minimo_efectivo = holgura_minima_efectiva(preferencia, prenda.elasticidad)
         desviaciones = tuple(
             max(minimo_efectivo - medida.holgura, medida.holgura - maximo, 0)
             for medida in ingresadas
@@ -68,7 +84,8 @@ class CalculadoraCalce:
             else 0
         )
         puntuacion = (
-            desviacion_media * 2 + distancia_objetivo * 0.2
+            desviacion_media * PESO_PUNTAJE_DESVIACION
+            + distancia_objetivo * PESO_PUNTAJE_OBJETIVO
             if ingresadas
             else inf
         )

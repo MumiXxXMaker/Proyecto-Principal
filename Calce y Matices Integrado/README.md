@@ -3,6 +3,12 @@
 Aplicación web local que integra el análisis de color de Matices con las
 recomendaciones de calce y el catálogo de Calce.
 
+## Navegación
+
+La app abre en **Home**, que presenta el escaparate con un banner, categorías,
+productos destacados y una breve descripción de la experiencia. **Tu Calce**
+conserva la guía para foto, medidas y recomendaciones de calce.
+
 ## Flujo integrado
 
 1. Toma una foto con la cámara del dispositivo o selecciona una imagen. Al
@@ -126,7 +132,7 @@ servidor.
 - `data/vestua_catalog.json`: instantánea de publicaciones únicas de Vestua con título, categoría, talla, precio y URL.
 - `data/tiendas_mujer.json`: instantánea de prendas con imagen de Tricot y Paris.
 - `scripts/importar_catalogo_mujer.py`: actualiza la instantánea pública de productos.
-- `data/Tabla_estandar.xlsx`: tabla estándar de tallas y rangos corporales adjunta.
+- `data/Tabla_estandar.xlsx`: rangos corporales de referencia usados para estimar tallas.
 
 El catálogo y los factores de calce se cargan desde sus respectivas hojas del
 Excel al iniciar la aplicación. Las filas que repiten la misma marca, categoría,
@@ -154,7 +160,7 @@ El selector de marca comienza en Zara. La marca y el tipo de prenda recomendados
 corresponden a una misma referencia elegible: la que obtiene la menor puntuación
 al comparar sus medidas con el perfil. Los resultados del carrusel respetan los
 filtros seleccionados.
-En Inicio, un carrusel adicional recomienda prendas con foto y enlace a su ficha
+En Tu Calce, un carrusel adicional recomienda prendas con foto y enlace a su ficha
 en Paris y Tricot según el calce estimado y el tipo de prenda seleccionado. Las
 medidas se calculan con referencias de la matriz; no son medidas físicas
 publicadas por las tiendas.
@@ -162,18 +168,20 @@ Las pestañas **Todas**, **Arriba** y **Abajo** filtran por todas las prendas,
 prendas superiores (poleras, blusas, tops, blazers y vestidos) o inferiores
 (pantalones y jeans), respectivamente. El selector de tipo de prenda muestra
 solo las categorías disponibles en el catálogo. Las recomendaciones de
-La aplicación pide busto/pecho, cintura y cadera. La tabla estándar usa las
-tres medidas para recomendar tallas; la puntuación de calce de las prendas usa
+La aplicación pide busto/pecho, cintura y cadera. La estimación de talla usa las
+tres medidas; la puntuación de calce de las prendas usa
 cintura y cadera porque las referencias de Vestua no publican medidas físicas
 individuales de busto.
 Las medidas de la matriz se repiten entre marcas para cada categoría; por eso,
 cuando hay empate, la app muestra todas las marcas con mejor puntuación y no
 afirma que una marca ajuste mejor que otra. Estas referencias no sustituyen
 medidas verificadas por producto.
-Sobre la tabla estándar aparece otro carrusel con las demás prendas cuyo
-diagnóstico indica calce compatible o cercano; excluye las opciones ya mostradas
-en el carrusel principal y requiere medidas para comparar.
-Las tallas se estiman con la tabla estándar adjunta; la matriz no contiene
+En Tu Calce, después de las recomendaciones principales aparece otro carrusel
+con las demás prendas cuyo diagnóstico indica calce compatible o cercano;
+excluye las opciones ya mostradas en el carrusel principal y requiere medidas
+para comparar. La sección **Info** reúne la metodología y los factores de la matriz de calce.
+Las tallas se estiman con los rangos de referencia adjuntos, que no se muestran
+como tabla en la interfaz; la matriz no contiene
 tablas oficiales específicas por marca, por lo que se debe confirmar la guía
 oficial antes de comprar. La conversión a tallas de EE. UU. es aproximada.
 Las referencias son orientativas y no garantizan el
@@ -201,7 +209,7 @@ consulta del catálogo y pueden cambiar. Se pueden seleccionar varias prendas
 para comparar diagnóstico, medidas referenciales y precio; cada enlace lleva a
 Vestua para confirmar disponibilidad y completar la compra.
 Cada tarjeta indica en la esquina superior derecha el diagnóstico estimado de
-calce con las medidas de cintura y cadera ingresadas en Inicio. Si faltan medidas
+calce con las medidas de cintura y cadera ingresadas en Tu Calce. Si faltan medidas
 o una referencia comparable, se informa en la tarjeta en vez de presentar un
 resultado como seguro.
 
