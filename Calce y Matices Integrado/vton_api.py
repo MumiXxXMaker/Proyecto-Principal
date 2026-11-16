@@ -46,6 +46,7 @@ model_image = (
 app = modal.App("probador-virtual-api")
 model_volume = modal.Volume.from_name("vton-weights", create_if_missing=True)
 
+
 class TryOnRequest(BaseModel):
     person_image_base64: str = Field(min_length=1, max_length=14_000_000)
     garment_image_base64: str = Field(min_length=1, max_length=14_000_000)
@@ -83,7 +84,8 @@ def _ensure_model_weights() -> None:
     from huggingface_hub import hf_hub_download
 
     MODEL_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    if not (MODEL_DIRECTORY / "model.safetensors").is_file():
+    model_weights = MODEL_DIRECTORY / "model.safetensors"
+    if not model_weights.is_file():
         hf_hub_download(
             repo_id="fashn-ai/fashn-vton-1.5",
             filename="model.safetensors",
@@ -187,7 +189,7 @@ def try_on_endpoint(
     if not expected_token or not hmac.compare_digest(supplied_token, expected_token):
         raise HTTPException(401, "Se requiere un token Bearer válido.")
 
-    person_image =     _decode_image(req.person_image_base64, "person_image_base64")
+    _decode_image(req.person_image_base64, "person_image_base64")
     _decode_image(req.garment_image_base64, "garment_image_base64")
 
     output_b64 = model.generate.remote(
