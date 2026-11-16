@@ -834,6 +834,11 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('href="/?view=home" aria-current="page">Tu Calce</a>', home_page)
         self.assertIn('href="/?view=storefront" aria-current="page">Home</a>', storefront_page)
         self.assertIn('src="/assets/calce-isotipo.png"', storefront_page)
+        self.assertIn("<title>Calce Wardrobe</title>", storefront_page)
+        self.assertIn(
+            '<link rel="icon" type="image/png" href="/assets/calce-isotipo.png">',
+            storefront_page,
+        )
         self.assertIn('id="storefront-title"', storefront_page)
         self.assertIn("Productos destacados", storefront_page)
         self.assertIn('data-page-panel="storefront"', storefront_page)
