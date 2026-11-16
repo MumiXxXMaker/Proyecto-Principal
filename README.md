@@ -58,40 +58,6 @@ variable de entorno en Render. Para habilitar el probador, configura también
 `vton-api-auth`. Render solicitará estas variables al sincronizar el Blueprint;
 el token no debe publicarse ni guardarse en el repositorio. No publiques `.env`
 ni uses la clave `service_role`.
-<<<<<<< HEAD
-
-## Integración con Aiuta Virtual Try-On
-
-La llamada a Aiuta se ejecuta en una Edge Function de Supabase, no en el
-servidor Python ni en el navegador. Requiere una sesión iniciada. Para
-habilitarla:
-
-1. En el panel SQL de Supabase, ejecuta `supabase/schema.sql` para crear la
-   tabla de operaciones, las políticas RLS y el bucket privado temporal.
-2. Suscríbete al producto Virtual Try-On en el
-   [portal de Aiuta](https://developer.aiuta.com/products/digital-try-on/documentation).
-   En Supabase, configura `AIUTA_API_KEY` como secreto de Edge Functions; no la
-   agregues a `.env`, Render ni al código del cliente.
-3. Despliega la función desde `Calce y Matices Integrado`:
-
-   ```bash
-   supabase functions deploy aiuta-try-on
-   ```
-
-Las operaciones y sus estados, SKU, errores y URLs de resultados se guardan en
-`aiuta_try_on_operations`, con acceso de lectura limitado mediante RLS a la
-cuenta propietaria. La foto se sube a un bucket privado temporal y la función la
-elimina después de enviarla a Aiuta. Solo se admiten fotos JPEG, PNG o WebP de
-hasta 10 MB. La retención de los resultados depende de la suscripción de Aiuta.
-
-Los SKU deben existir en el catálogo registrado en Aiuta. El botón
-**Probar virtualmente** de cada producto precarga el ID público de la tienda,
-que solo funcionará si coincide con un SKU de Aiuta; también puedes editar el
-SKU y el nombre del catálogo. Consulta el [flujo y referencia oficial de la
-API](https://docs.aiuta.com/api/try-on/).
-=======
->>>>>>> da56ce1 (Refactor code structure for improved readability and maintainability)
-
 Para que funcionen las confirmaciones de correo, agrega
 `https://calce-matices-publica.onrender.com/**` a **Supabase → Authentication →
 URL Configuration → Redirect URLs**.
@@ -165,26 +131,9 @@ como secreto de Modal y protege el endpoint:
 
 ```bash
 cd "Calce y Matices Integrado"
-<<<<<<< HEAD
-<<<<<<< HEAD
 python3.11 -m pip install --user --upgrade modal fastapi
 python3.11 -m modal setup
 python3.11 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
-=======
-python3 -m pip install modal fastapi
-<<<<<<< HEAD
-modal setup
-modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
->>>>>>> da56ce1 (Refactor code structure for improved readability and maintainability)
-=======
-python3 -m modal setup
-python3 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
->>>>>>> 83c1420 (Actualizar instrucciones de configuración en README: agregar 'python3 -m' antes de los comandos de Modal)
-=======
-python3.11 -m pip install --user --upgrade modal fastapi
-python3.11 -m modal setup
-python3.11 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
->>>>>>> f39d49d (Actualizar instrucciones en README para utilizar Python 3.11 en la instalación y configuración de Modal.)
 ```
 
 Después del despliegue, configura `VTON_API_URL` con la URL base permanente de
@@ -205,10 +154,6 @@ python3.11 -m modal deploy vton_api.py
 Para obtener una URL temporal que se actualiza al guardar cambios:
 
 ```bash
-<<<<<<< HEAD
-python3.11 -m modal serve vton_api.py
-=======
-cd "Calce y Matices Integrado"
 python3.11 -m modal serve vton_api.py
 ```
 
@@ -217,12 +162,7 @@ desarrollo con `Ctrl+C` y publica la API:
 
 ```bash
 cd "Calce y Matices Integrado"
-<<<<<<< HEAD
-python3 -m modal deploy vton_api.py
->>>>>>> 83c1420 (Actualizar instrucciones de configuración en README: agregar 'python3 -m' antes de los comandos de Modal)
-=======
 python3.11 -m modal deploy vton_api.py
->>>>>>> f39d49d (Actualizar instrucciones en README para utilizar Python 3.11 en la instalación y configuración de Modal.)
 ```
 
 Modal entrega una URL permanente con formato

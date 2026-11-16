@@ -24,7 +24,7 @@ import webbrowser
 
 from medidas.perfil_medidas import PerfilMedidas
 from medidas.tallas import RepositorioTallasEstandar, recomendar_tallas
-from metricas.calculadora_calce import CalculadoraCalce
+from metricas.calculadora_calce import CalculadoraCalce, PREFERENCIAS_CALCE
 from metricas.resultado_calce import ResultadoCalce
 from prendas import (
     CatalogoPrendas,
@@ -185,7 +185,7 @@ WOMENSWEAR_STORES = (
     ("Paris", "https://www.paris.cl/mujer/"),
     ("Tricot", "https://www.tricot.cl/mujer"),
 )
-CATALOG_PAGE_SIZE = 9
+CATALOG_PAGE_SIZE = 20
 CATALOG_SORT_OPTIONS = (
     ("fit-asc", "Mejor calce"),
     ("fit-desc", "Peor calce"),
@@ -425,7 +425,7 @@ def _personal_recommendations(
 
     return (
         '<section class="personal-recommendations" aria-label="Resumen de recomendaciones">'
-        '<div class="help-heading"><h3>Recomendaciones según tus medidas</h3>'
+        '<div class="help-heading">'
         '<button class="measurement-help-trigger" type="button" '
         'aria-label="Ayuda sobre recomendaciones según tus medidas" '
         'aria-describedby="recommendations-help">?</button>'
@@ -441,9 +441,6 @@ def _personal_recommendations(
         f'<div><span>Talla alfa</span><strong>{sizes}</strong>'
         f'<small>{escape(size_note)}</small></div>'
         "</div>"
-        f'<a class="catalog-toggle" href="{escape(catalog_url, quote=True)}" '
-        'aria-controls="catalog-panel">'
-        "Ver catálogo completo</a>"
         "</section>"
     )
 
@@ -571,24 +568,22 @@ def _garment_catalog(
         '<section class="garment-catalog" id="garment-catalog" data-garment-catalog '
         f'data-catalog-page-index="{catalog_data["page"]}" '
         f'aria-labelledby="garment-catalog-title"{visibility}>'
-        '<div class="catalog-heading"><div>'
-        '<h2 id="garment-catalog-title">Catálogo completo de prendas</h2></div>'
-        f'<label class="catalog-sort-label" for="catalog-sort">Ordenar por'
-        '<select id="catalog-sort" data-catalog-sort>'
-        f'{sort_options}</select></label></div>'
-        f'<div class="catalog-filters">'
-        f'<label>Buscar prendas<input type="search" data-catalog-search '
+        '<div class="catalog-shell">'
+        '<aside class="catalog-sidebar"><div class="catalog-filter-card">'
+        '<h3>Filtros</h3>'
+        '<div class="catalog-filters">'
+        '<label>Buscar prendas<input type="search" data-catalog-search '
         f'value="{escape(query.get("search", ""), quote=True)}" '
         'placeholder="Nombre, marca o categoría"></label>'
-        f'<label>Tipo de prenda<select data-catalog-type-filter>'
+        '<label>Tipo de prenda<select data-catalog-type-filter>'
         f'{type_options}</select></label></div>'
-        '<p class="catalog-price-note">Productos e imágenes se consultan en las '
-        "tiendas enlazadas; precios y disponibilidad pueden cambiar. Paris informa "
-        f'{WOMENSWEAR_DATA["stores"]["Paris"]["results_reported"]:,} resultados y '
-        f'Tricot {WOMENSWEAR_DATA["stores"]["Tricot"]["results_reported"]:,}. '
-        "No se asignan medidas físicas que las fichas no publican.</p>"
-        f'<p class="catalog-result-count" data-catalog-result-count '
-        f'aria-live="polite">{escape(catalog_data["result_text"])}</p>'
+        '</div></aside>'
+        '<div class="catalog-main">'
+        '<div class="catalog-heading"><div>'
+        '<h2 id="garment-catalog-title">Catálogo completo de prendas</h2></div>'
+        '<label class="catalog-sort-label" for="catalog-sort">Ordenar por'
+        '<select id="catalog-sort" data-catalog-sort>'
+        f'{sort_options}</select></label></div>'
         f'<div class="catalog-grid" data-catalog-items '
         f'data-catalog-page-size="{CATALOG_PAGE_SIZE}">{catalog_data["cards"]}</div>'
         '<nav class="catalog-pagination" data-catalog-pagination '
@@ -600,6 +595,8 @@ def _garment_catalog(
         '<button type="button" data-catalog-next'
         f'{" disabled" if page_number >= page_count else ""}>Siguiente →</button>'
         '</nav>'
+        f'<p class="catalog-result-count" data-catalog-result-count '
+        f'aria-live="polite">{escape(catalog_data["result_text"])}</p>'
         '<div class="catalog-selection-bar">'
         '<span data-catalog-selection-status aria-live="polite">Ninguna prenda seleccionada</span>'
         '<button class="catalog-compare-button" type="button" '
@@ -612,7 +609,7 @@ def _garment_catalog(
         'confirmar disponibilidad y completar la compra.</p>'
         '<div data-catalog-comparison-items></div>'
         '<p class="catalog-total" data-catalog-total></p>'
-        '</section></section>'
+        '</section></div></div></section>'
     )
 
 
@@ -645,6 +642,31 @@ def _virtual_try_on_panel() -> str:
         '<img data-vton-garment-preview alt="Imagen de la prenda seleccionada" hidden>'
         '<p data-vton-garment-empty>Selecciona una prenda para ver su imagen.</p>'
         '</div>'
+        '<section class="try-on-cart-selection" data-vton-cart-selection '
+        'aria-labelledby="vton-cart-selection-title">'
+        '<h2 id="vton-cart-selection-title">Carrito</h2>'
+        '<p>Marca las prendas que quieres revisar antes de confirmar la compra.</p>'
+        '<div data-vton-cart-products></div>'
+        '<p data-vton-cart-count aria-live="polite">0 prendas en el carrito</p>'
+        '<button type="button" class="matices-button" data-vton-open-cart disabled>'
+        'Ir al carrito</button>'
+        '</section>'
+        '<section class="try-on-cart" data-vton-cart aria-label="Carrito de prendas" hidden>'
+        '<h2>Tu carrito</h2><ul data-vton-cart-items></ul>'
+        '<p data-vton-cart-total></p>'
+        '<button type="button" class="matices-button" data-vton-back-selection>Volver</button>'
+        '<button type="button" class="matices-button matices-button-primary" '
+        'data-vton-confirm disabled>Pasar a confirmar compra</button>'
+        '</section>'
+        '<section class="try-on-confirmation" data-vton-confirmation '
+        'aria-label="Confirma tu selección" hidden>'
+        '<h2>Confirma tu selección</h2><ul data-vton-confirmation-items></ul>'
+        '<p data-vton-confirmation-total></p>'
+        '<p data-vton-confirmation-status role="status" aria-live="polite"></p>'
+        '<p>La compra se finaliza en la tienda de cada prenda. Calce no procesa pagos ni pedidos.</p>'
+        '<button type="button" class="matices-button" data-vton-back-cart>Volver al carrito</button>'
+        '<button type="button" class="matices-button matices-button-primary" '
+        'data-vton-finish>Confirmar selección</button></section>'
         '<button class="matices-button matices-button-primary" type="button" '
         'data-vton-generate disabled>Probar prenda</button>'
         '</div></div>'
@@ -768,6 +790,7 @@ def _virtual_try_on_products(search: str) -> Dict[str, object]:
                 "store": CATALOG_STORES_BY_URL.get(product.url, "Vestua"),
                 "size": product.talla or "No indicada",
                 "image_url": image_url,
+                "price_clp": product.precio_clp,
                 "category": _virtual_try_on_category(product),
             }
         )
@@ -1266,6 +1289,184 @@ def _alternative_recommendations(
     )
 
 
+def _storefront_content() -> str:
+    category_specs = (
+        ("Blusas", "Blusa"),
+        ("Jeans", "Jeans"),
+        ("Vestidos", "Vestido"),
+        ("Chaquetas", "Chaqueta"),
+    )
+    featured_types = ("Blazer", "Pantalón", "Vestido", "Blusa")
+    storefront_types = {
+        product_type for _, product_type in category_specs
+    } | set(featured_types)
+    products_by_type = {}
+    for product in CATALOG_PRODUCTS:
+        if product.tipo_prenda in storefront_types:
+            products_by_type.setdefault(product.tipo_prenda, product)
+
+    categories = "".join(
+        f"""<a class="storefront-category" href="/?{urlencode({
+            "view": "catalog", "type": product_type
+        })}" aria-label="Explorar {escape(label, quote=True)}">
+          <img src="{escape(CATALOG_IMAGES_BY_URL[product.url], quote=True)}"
+            alt="" loading="lazy" referrerpolicy="no-referrer">
+          <span class="storefront-category-copy">
+            <span class="eyebrow">Descubre</span><strong>{escape(label)}</strong>
+            <span>Ver prendas <span aria-hidden="true">→</span></span>
+          </span>
+        </a>"""
+        for label, product_type in category_specs
+        if (product := products_by_type.get(product_type)) is not None
+    )
+    featured = "".join(
+        f"""<article class="storefront-product">
+          <a class="storefront-product-image" href="{escape(product.url, quote=True)}"
+            target="_blank" rel="noopener noreferrer">
+            <img src="{escape(CATALOG_IMAGES_BY_URL[product.url], quote=True)}"
+              alt="{escape(product.titulo, quote=True)}" loading="lazy"
+              referrerpolicy="no-referrer">
+          </a>
+          <div class="storefront-product-info">
+            <span>{escape(CATALOG_STORES_BY_URL.get(product.url, "Vestua"))}
+              · {escape(product.marca or "Marca no indicada")}</span>
+            <a href="{escape(product.url, quote=True)}" target="_blank"
+              rel="noopener noreferrer">{escape(product.titulo)}</a>
+            <strong>{_format_price(product.precio_clp)}</strong>
+          </div>
+        </article>"""
+        for product_type in featured_types
+        if (product := products_by_type.get(product_type)) is not None
+    )
+    hero_product = products_by_type.get("Vestido")
+    hero_image = (
+        f"""<a class="storefront-hero-visual"
+          href="{escape(hero_product.url, quote=True)}" target="_blank"
+          rel="noopener noreferrer" aria-label="Ver {escape(hero_product.titulo, quote=True)}">
+          <img src="{escape(CATALOG_IMAGES_BY_URL[hero_product.url], quote=True)}"
+            alt="" fetchpriority="high" referrerpolicy="no-referrer">
+        </a>"""
+        if hero_product
+        else ""
+    )
+    promises = (
+        ("Explora distintas tiendas", "Descubre prendas de Vestua, Paris y Tricot."),
+        ("Encuentra tu estilo", "Navega por categorías y encuentra nuevas opciones."),
+        ("Orientación de calce", "Compara referencias con tus medidas y preferencias."),
+        ("Compra en origen", "Confirma disponibilidad directamente en la tienda."),
+        ("Elige con confianza", "Usa la información como guía; tú decides qué te gusta."),
+    )
+    promise_items = "".join(
+        f'<li><strong>{escape(title)}</strong><span>{escape(description)}</span></li>'
+        for title, description in promises
+    )
+    return f"""<div class="storefront-page">
+      <section class="storefront-hero" aria-labelledby="storefront-title">
+        <div class="storefront-hero-copy">
+          <span class="eyebrow">Calce · probador online</span>
+          <h1 id="storefront-title">Tu estilo, tu calce, tu manera de elegir.</h1>
+          <p>Explora prendas, descubre nuevos favoritos y encuentra referencias que te ayuden a elegir con más confianza.</p>
+          <div class="storefront-hero-actions">
+            <a class="matices-button matices-button-primary" href="/?view=catalog">Explorar prendas</a>
+            <a class="matices-button" href="/?view=home">Conocer mi calce</a>
+          </div>
+        </div>
+        {hero_image}
+      </section>
+      <section class="storefront-promise" aria-labelledby="storefront-promise-title">
+        <h2 id="storefront-promise-title">Una experiencia para elegir a tu manera</h2>
+        <ul>{promise_items}</ul>
+      </section>
+      <section class="storefront-section" aria-labelledby="storefront-categories-title">
+        <div class="storefront-section-heading">
+          <div><span class="eyebrow">Explora por estilo</span>
+            <h2 id="storefront-categories-title">Encuentra tu próxima prenda</h2></div>
+          <a href="/?view=catalog">Ver todo el catálogo <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="storefront-categories">{categories}</div>
+      </section>
+      <section class="storefront-section" aria-labelledby="storefront-featured-title">
+        <div class="storefront-section-heading">
+          <div><span class="eyebrow">Selección Calce</span>
+            <h2 id="storefront-featured-title">Productos destacados</h2></div>
+          <a href="/?view=catalog">Descubrir más <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="storefront-products">{featured}</div>
+      </section>
+      <section class="storefront-story" aria-labelledby="storefront-story-title">
+        <img src="/assets/calce-isotipo.png" alt="" loading="lazy">
+        <div><span class="eyebrow">Nuestra forma de verlo</span>
+          <h2 id="storefront-story-title">La moda empieza por sentirte bien con lo que eliges.</h2>
+          <p>Reunimos inspiración, prendas y orientación de calce en un solo lugar. Compara opciones con tus medidas y preferencias para tomar decisiones más informadas. Las recomendaciones son referenciales y no reemplazan las medidas verificadas de cada producto.</p>
+          <a class="storefront-story-link" href="/?view=home">Conoce tu calce <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+    </div>"""
+
+
+def _fit_information_content(size_chart: str) -> str:
+    preference_labels = {
+        "adjusted": "Ajustado",
+        "regular": "Regular",
+        "loose": "Holgado",
+    }
+    preference_rows = "".join(
+        f"<tr><th scope=\"row\">{preference_labels[key]}</th>"
+        f"<td>{minimum:g} a {maximum:g} cm</td><td>{target:g} cm</td></tr>"
+        for key, (minimum, maximum, target) in PREFERENCIAS_CALCE.items()
+    )
+    factors = "".join(
+        f"""<article class="fit-info-factor">
+          <span>{escape(category)} · {escape(impact)}</span>
+          <h3>{escape(name)}</h3><p>{escape(description)}</p>
+        </article>"""
+        for category, name, description, impact in sorted(
+            VARIABLES,
+            key=lambda variable: IMPACT_PRIORITY.get(
+                variable[3], len(IMPACT_PRIORITY)
+            ),
+        )
+    )
+    return f"""<div class="fit-info-page">
+      <div class="fit-info-hero">
+        <span class="eyebrow">Calce · metodología</span>
+        <h1 id="fit-info-title">Cómo comparamos las prendas</h1>
+        <p>Conoce las medidas, rangos y criterios que usa Calce para ordenar las referencias. El resultado orienta tu elección y no garantiza el calce real.</p>
+      </div>
+      <section class="fit-info-overview" aria-label="Resumen del cálculo">
+        <article><span>01</span><h2>Cintura y cadera</h2>
+          <p>Son las medidas corporales que se comparan para calcular el ajuste. El busto se consulta aparte en la tabla estándar de tallas.</p></article>
+        <article><span>02</span><h2>Holgura</h2>
+          <p>Se calcula restando la medida corporal a la medida de la prenda. Un valor positivo indica espacio; uno negativo, que la prenda mide menos.</p></article>
+        <article><span>03</span><h2>Menor puntaje</h2>
+          <p>Entre referencias comparables, un puntaje menor aparece primero. Con medidas incompletas, el diagnóstico es parcial.</p></article>
+      </section>
+      <section class="fit-info-panel">
+        <h2>Rangos orientativos de holgura</h2>
+        <div class="table-scroll"><table class="fit-info-table">
+          <thead><tr><th>Preferencia</th><th>Rango esperado</th><th>Objetivo</th></tr></thead>
+          <tbody>{preference_rows}</tbody>
+        </table></div>
+      </section>
+      <section class="fit-info-panel">
+        <h2>Qué forma el puntaje</h2>
+        <p class="fit-info-formula">Puntaje = 2 × desviación media + 0,2 × distancia media al objetivo</p>
+        <ul><li>La desviación mide los centímetros fuera del rango elegido; dentro del rango vale 0.</li>
+          <li>La distancia al objetivo es la diferencia absoluta entre holgura y objetivo.</li>
+          <li>Desde 8% de elasticidad, el mínimo de holgura efectivo no puede ser inferior a −1 cm.</li>
+          <li>La tolerancia propia de cada referencia afecta el diagnóstico, no el puntaje.</li></ul>
+        <h2>Cómo interpretar el diagnóstico</h2>
+        <p>“Podría quedarte bien” indica que las medidas están dentro del rango. Los estados de límite consideran la tolerancia de la referencia; si falta cintura o cadera, la revisión será parcial.</p>
+      </section>
+      <section class="fit-info-panel">{size_chart}</section>
+      <section class="fit-info-panel">
+        <h2>Factores de la matriz de referencia</h2>
+        <p>La etiqueta indica el nivel informativo de impacto y no es un multiplicador adicional del puntaje.</p>
+        <div class="fit-info-factors">{factors}</div>
+      </section>
+    </div>"""
+
+
 def renderizar_pagina(query: Dict[str, str]) -> str:
     marca = query.get("brand", "Zara")
     categoria = query.get("category", "")
@@ -1288,8 +1489,10 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
     requested_view = query.get("view")
     active_view = (
         requested_view
-        if requested_view in {"catalog", "account", "try-on"}
-        else "home"
+        if requested_view in {
+            "storefront", "home", "catalog", "account", "try-on", "profile", "info"
+        }
+        else "home" if "wizard_step" in query else "storefront"
     )
     categorias_permitidas = (
         CATALOG.categorias()
@@ -1341,15 +1544,21 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         if query.get(measurement):
             catalog_query[measurement] = query[measurement]
     catalog_url = f"/?{urlencode(catalog_query)}"
+    storefront_tab_query = dict(query)
+    storefront_tab_query["view"] = "storefront"
+    storefront_tab_url = "/?" + urlencode(storefront_tab_query)
     home_tab_query = dict(query)
-    home_tab_query.pop("view", None)
-    home_tab_url = "/?" + urlencode(home_tab_query) if home_tab_query else "/"
+    home_tab_query["view"] = "home"
+    home_tab_url = "/?" + urlencode(home_tab_query)
     catalog_tab_query = dict(query)
     catalog_tab_query["view"] = "catalog"
     catalog_tab_url = f"/?{urlencode(catalog_tab_query)}"
     try_on_tab_query = dict(query)
     try_on_tab_query["view"] = "try-on"
     try_on_tab_url = f"/?{urlencode(try_on_tab_query)}"
+    info_tab_query = dict(query)
+    info_tab_query["view"] = "info"
+    info_tab_url = "/?" + urlencode(info_tab_query)
     auth_base_query = {"view": "account", "wizard_step": "2"}
     auth_base_query["auth_mode"] = "sign-in"
     sign_in_url = f"/?{urlencode(auth_base_query)}"
@@ -1377,6 +1586,8 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         or ((categoria,) if categoria else None),
     )
     size_chart = _size_chart(perfil)
+    storefront_content = _storefront_content()
+    fit_information_content = _fit_information_content(size_chart)
     results_heading = (
         '<div class="results-head">'
         '<div><h2>Tus mejores opciones</h2>'
@@ -1438,7 +1649,7 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         supabase_publishable_key=escape(SUPABASE_PUBLISHABLE_KEY, quote=True),
         startup_dialogs=(
             ""
-            if active_view in {"catalog", "try-on"}
+            if active_view != "home"
             else (
                 '<dialog class="welcome-dialog" data-startup-dialog '
                 'aria-labelledby="welcome-title">'
@@ -1462,17 +1673,25 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         alternative_recommendations=alternative_recommendations,
         store_recommendations=store_recommendations,
         garment_catalog=garment_catalog,
+        storefront_content=storefront_content,
+        fit_information_content=fit_information_content,
         virtual_try_on_panel=virtual_try_on_panel,
         size_chart=size_chart,
         variables=variables,
+        storefront_url=escape(storefront_tab_url, quote=True),
         home_tab_url=escape(home_tab_url, quote=True),
         catalog_tab_url=escape(catalog_tab_url, quote=True),
         try_on_tab_url=escape(try_on_tab_url, quote=True),
+        info_tab_url=escape(info_tab_url, quote=True),
         sign_in_url=escape(sign_in_url, quote=True),
         sign_up_url=escape(sign_up_url, quote=True),
+        storefront_link_current=(
+            ' aria-current="page"' if active_view == "storefront" else ""
+        ),
         home_link_current=' aria-current="page"' if active_view == "home" else "",
         catalog_link_current=' aria-current="page"' if active_view == "catalog" else "",
         try_on_link_current=' aria-current="page"' if active_view == "try-on" else "",
+        info_link_current=' aria-current="page"' if active_view == "info" else "",
         sign_in_link_current=(
             ' aria-current="page"'
             if active_view == "account" and query.get("auth_mode") != "sign-up"
@@ -1484,10 +1703,15 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
             else ""
         ),
         home_panel_hidden=(
-            ' hidden' if active_view in {"catalog", "try-on"} else ""
+            ' hidden' if active_view not in {"home", "account"} else ""
         ),
+        storefront_panel_hidden=(
+            ' hidden' if active_view != "storefront" else ""
+        ),
+        info_panel_hidden=' hidden' if active_view != "info" else "",
         catalog_panel_hidden=' hidden' if active_view != "catalog" else "",
         try_on_panel_hidden=' hidden' if active_view != "try-on" else "",
+        profile_panel_hidden=' hidden' if active_view != "profile" else "",
     )
 
 

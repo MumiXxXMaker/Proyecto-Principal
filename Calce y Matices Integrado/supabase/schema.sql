@@ -1,20 +1,113 @@
 create table if not exists public.user_profiles (
   user_id uuid primary key references auth.users (id) on delete cascade,
+  email text,
+  first_name text,
+  last_name text,
+  phone text check (phone is null or phone ~ '^\+56 9 [0-9]{4} [0-9]{4}$'),
   bust numeric,
   waist numeric,
   hip numeric,
   remember_measurements boolean not null default false,
   remember_photo boolean not null default false,
   photo_path text,
+  avatar_path text,
   color_palette jsonb not null default '[]'::jsonb
     check (jsonb_typeof(color_palette) = 'array'),
   updated_at timestamptz not null default now()
 );
 
 alter table public.user_profiles
+  add column if not exists email text,
+  add column if not exists first_name text,
+  add column if not exists last_name text,
+  add column if not exists phone text
+    check (phone is null or phone ~ '^\+56 9 [0-9]{4} [0-9]{4}$'),
   add column if not exists remember_measurements boolean not null default false,
   add column if not exists remember_photo boolean not null default false,
-  add column if not exists photo_path text;
+  add column if not exists photo_path text,
+  add column if not exists avatar_path text;
+
+create or replace function public.set_user_profile_email()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  select users.email
+    into new.email
+  from auth.users as users
+  where users.id = new.user_id;
+
+  if not found then
+    raise exception 'Profile must reference an authenticated user.';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.set_user_profile_email()
+  from public, anon, authenticated;
+
+drop trigger if exists set_user_profile_email
+  on public.user_profiles;
+create trigger set_user_profile_email
+  before insert or update of user_id, email
+  on public.user_profiles
+  for each row
+  execute function public.set_user_profile_email();
+
+create or replace function public.sync_auth_user_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.user_profiles (user_id, email, first_name, last_name)
+  values (
+    new.id,
+    new.email,
+    nullif(new.raw_user_meta_data ->> 'first_name', ''),
+    nullif(new.raw_user_meta_data ->> 'last_name', '')
+  )
+  on conflict (user_id) do update
+  set email = excluded.email,
+      first_name = coalesce(
+        public.user_profiles.first_name,
+        excluded.first_name
+      ),
+      last_name = coalesce(
+        public.user_profiles.last_name,
+        excluded.last_name
+      );
+  return new;
+end;
+$$;
+
+revoke all on function public.sync_auth_user_profile()
+  from public, anon, authenticated;
+
+drop trigger if exists sync_auth_user_profile
+  on auth.users;
+create trigger sync_auth_user_profile
+  after insert or update of email, raw_user_meta_data
+  on auth.users
+  for each row
+  execute function public.sync_auth_user_profile();
+
+insert into public.user_profiles (user_id, email, first_name, last_name)
+select
+  users.id,
+  users.email,
+  nullif(users.raw_user_meta_data ->> 'first_name', ''),
+  nullif(users.raw_user_meta_data ->> 'last_name', '')
+from auth.users as users
+on conflict (user_id) do update
+set email = excluded.email,
+    first_name = coalesce(public.user_profiles.first_name, excluded.first_name),
+    last_name = coalesce(public.user_profiles.last_name, excluded.last_name);
 
 update public.user_profiles
 set remember_measurements = true

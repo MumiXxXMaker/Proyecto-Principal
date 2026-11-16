@@ -1,3 +1,14 @@
+let resolveAuthStateReady;
+window.calceAuthStateReady = new Promise(resolve => {
+  resolveAuthStateReady = resolve;
+});
+
+const finishAuthStateInitialization = isAuthenticated => {
+  if (!resolveAuthStateReady) return;
+  resolveAuthStateReady(isAuthenticated);
+  resolveAuthStateReady = null;
+};
+
 const readJsonResponse = async (response, endpoint) => {
   const body = await response.text();
   const contentType = response.headers.get("content-type") || "sin Content-Type";
@@ -120,7 +131,11 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       const storedValues = localStorage.getItem(rememberedValuesKey);
       const currentValues = readMeasurementValues();
       const hasCurrentMeasurement = Object.values(currentValues).some(Boolean);
-      if (rememberCheckbox.checked && storedValues) {
+      if (
+        rememberCheckbox.checked
+        && storedValues
+        && window.calceAuthenticated === true
+      ) {
         const parsedValues = JSON.parse(storedValues);
         if (!parsedValues || typeof parsedValues !== "object" || Array.isArray(parsedValues)) {
           throw new Error("Las medidas recordadas tienen un formato inválido.");
@@ -148,8 +163,12 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
           saveMeasurements();
           showRememberStatus("Medidas guardadas en este navegador.");
         } else {
-          localStorage.removeItem(rememberedEnabledKey);
-          localStorage.removeItem(rememberedValuesKey);
+          try {
+            localStorage.removeItem(rememberedEnabledKey);
+            localStorage.removeItem(rememberedValuesKey);
+          } catch (error) {
+            console.error("No se pudieron eliminar las medidas locales de una sesión anónima.", error);
+          }
           showRememberStatus("Se borraron las medidas guardadas.");
         }
       } catch (error) {
@@ -196,6 +215,8 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
   if (accountStatus && isStyleWizardForm) {
     const emailInput = document.getElementById("supabase-email");
     const passwordInput = document.getElementById("supabase-password");
+    const signUpNameInput = document.getElementById("supabase-name");
+    const signUpLastNameInput = document.getElementById("supabase-last-name");
     const confirmPasswordInput = document.getElementById("supabase-password-confirm");
     const rememberSessionInput = document.getElementById("supabase-remember-session");
     const rememberSessionRow = document.querySelector("[data-remember-session-row]");
@@ -210,6 +231,24 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const profileMenu = document.querySelector("[data-profile-menu]");
     const profileEmail = document.querySelector("[data-profile-email]");
     const profileEditLink = document.querySelector("[data-profile-edit]");
+    const profileAccountLink = document.querySelector("[data-profile-account]");
+    const profilePaymentLink = document.querySelector("[data-profile-payment]");
+    const profileName = document.querySelector("[data-profile-name]");
+    const profileAvatar = document.querySelector("[data-profile-avatar]");
+    const profileAvatarPreview = document.querySelector("[data-profile-avatar-preview]");
+    const profileAvatarInput = document.getElementById("profile-avatar-input");
+    const profileEmailInput = document.getElementById("profile-email");
+    const profileFirstNameInput = document.getElementById("profile-first-name");
+    const profileLastNameInput = document.getElementById("profile-last-name");
+    const profilePhoneInput = document.getElementById("profile-phone");
+    const profileDataStatus = document.querySelector("[data-profile-data-status]");
+    const saveProfileDataButton = document.querySelector("[data-save-profile-data]");
+    const profileBustInput = document.getElementById("profile-bust");
+    const profileWaistInput = document.getElementById("profile-waist");
+    const profileHipInput = document.getElementById("profile-hip");
+    const profileAvatarFallbacks = Array.from(
+      document.querySelectorAll("[data-profile-avatar-fallback]"),
+    );
     const accountLinks = Array.from(document.querySelectorAll("[data-open-account]"));
     const supabaseUrl = document.querySelector('meta[name="supabase-url"]')?.content;
     const supabaseKey = document.querySelector('meta[name="supabase-publishable-key"]')?.content;
@@ -230,6 +269,19 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     let cloudSaveTimer;
     const profilePhotoBucket = "user-profile-photos";
     const profilePhotoPath = user => `${user.id}/remembered-photo`;
+    const profileAvatarPath = user => `${user.id}/avatar`;
+    let profileAvatarPathValue;
+    let profileAvatarUrl;
+    let savedProfileFirstName = "";
+    let savedProfileLastName = "";
+    const profileFields = [
+      profileFirstNameInput, profileLastNameInput,
+      profilePhoneInput, profileBustInput, profileWaistInput, profileHipInput,
+    ].filter(Boolean);
+    const requestedReturnView = new URLSearchParams(window.location.search).get("return_view");
+    let authReturnView = ["home", "try-on", "profile"].includes(requestedReturnView)
+      ? requestedReturnView
+      : "home";
     let authMode = new URLSearchParams(window.location.search).get("auth_mode") === "sign-up"
       ? "sign-up"
       : "sign-in";
@@ -238,12 +290,36 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       accountStatus.textContent = message;
     };
     const setAuthControls = user => {
+      window.calceAuthenticated = Boolean(user);
       authForm.hidden = Boolean(user);
       profileMenu.hidden = !user;
       signOutButton.hidden = !user;
       profileEditLink.hidden = !user;
+      profileAccountLink.hidden = !user;
+      profilePaymentLink.hidden = !user;
       profileEmail.hidden = !user;
       profileEmail.textContent = user?.email || "Cuenta activa";
+      profileFields.forEach(field => { field.disabled = !user; });
+      if (rememberCheckbox) rememberCheckbox.disabled = !user;
+      if (rememberPhotoInput) rememberPhotoInput.disabled = !user;
+      profileName.textContent = user?.user_metadata?.first_name
+        || user?.email || "Mi Perfil";
+      if (profileEmailInput) {
+        profileEmailInput.disabled = true;
+        profileEmailInput.value = user?.email || "";
+      }
+      if (saveProfileDataButton) saveProfileDataButton.disabled = !user;
+      if (!user) {
+        profileAvatarPathValue = null;
+        if (profileAvatarUrl) URL.revokeObjectURL(profileAvatarUrl);
+        profileAvatarUrl = null;
+        profileFields.forEach(field => { field.value = ""; });
+        if (profileEmailInput) profileEmailInput.value = "";
+        profileName.textContent = "Mi Perfil";
+        profileAvatar.hidden = true;
+        profileAvatarPreview.hidden = true;
+        profileAvatarFallbacks.forEach(fallback => { fallback.hidden = false; });
+      }
       accountLinks.forEach(link => {
         link.hidden = Boolean(user);
       });
@@ -273,6 +349,14 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       confirmPasswordLabel.hidden = !creatingAccount;
       confirmPasswordInput.required = creatingAccount;
       confirmPasswordInput.disabled = !creatingAccount || Boolean(signedInUser);
+      document.querySelectorAll("[data-sign-up-only]").forEach(label => {
+        label.hidden = !creatingAccount;
+        const input = label.querySelector("input");
+        if (input) {
+          input.disabled = !creatingAccount || Boolean(signedInUser);
+          input.required = creatingAccount;
+        }
+      });
       rememberSessionRow.hidden = creatingAccount;
       signInButton.hidden = creatingAccount;
       signUpButton.hidden = !creatingAccount;
@@ -314,44 +398,68 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         return [];
       }
     };
-    const saveProfile = async () => {
+    const saveProfile = async (
+      persistMeasurements = false,
+      commitProfileName = false,
+    ) => {
       if (
         !supabaseClient
         || !signedInUser
         || profileLoadedUserId !== signedInUser.id
       ) return;
       const rememberPhoto = rememberPhotoInput?.checked === true;
-      const rememberMeasurements = rememberCheckbox?.checked === true || rememberPhoto;
-      if (!rememberMeasurements && !rememberPhoto) {
-        rememberedPhotoPath = null;
-        const { error } = await supabaseClient
-          .from("user_profiles")
-          .delete()
-          .eq("user_id", signedInUser.id);
-        if (error) throw error;
-        return;
-      }
+      const rememberMeasurements = (
+        persistMeasurements || rememberCheckbox?.checked === true || rememberPhoto
+      );
       const measurements = Object.fromEntries(measurementFields.map(field => [
         field.name,
         rememberMeasurements && field.value ? Number(field.value) : null,
       ]));
+      const phoneDigits = (profilePhoneInput?.value || "").replace(/\D/g, "");
+      if (phoneDigits && phoneDigits.length !== 8) {
+        throw new Error("Ingresa los 8 dígitos de tu teléfono chileno.");
+      }
+      const firstName = commitProfileName
+        ? profileFirstNameInput?.value.trim() || ""
+        : savedProfileFirstName;
+      const lastName = commitProfileName
+        ? profileLastNameInput?.value.trim() || ""
+        : savedProfileLastName;
       const { error } = await supabaseClient
         .from("user_profiles")
         .upsert({
           user_id: signedInUser.id,
-          bust: measurements.bust,
-          waist: measurements.waist,
-          hip: measurements.hip,
+          first_name: firstName || null,
+          last_name: lastName || null,
+          phone: phoneDigits
+            ? `+56 9 ${phoneDigits.slice(0, 4)} ${phoneDigits.slice(4)}`
+            : null,
+          bust: persistMeasurements && profileBustInput?.value
+            ? Number(profileBustInput.value)
+            : measurements.bust,
+          waist: persistMeasurements && profileWaistInput?.value
+            ? Number(profileWaistInput.value)
+            : measurements.waist,
+          hip: persistMeasurements && profileHipInput?.value
+            ? Number(profileHipInput.value)
+            : measurements.hip,
           remember_measurements: rememberMeasurements,
           remember_photo: rememberPhoto,
           photo_path: rememberPhoto ? rememberedPhotoPath : null,
+          avatar_path: profileAvatarPathValue || null,
           color_palette: rememberMeasurements ? readPalette() : [],
           updated_at: new Date().toISOString(),
         }, { onConflict: "user_id" });
       if (error) throw error;
+      if (commitProfileName) {
+        savedProfileFirstName = firstName;
+        savedProfileLastName = lastName;
+        profileName.textContent = firstName || signedInUser.email || "Mi Perfil";
+      }
       if (rememberMeasurements) {
         showRememberStatus("Medidas y paleta guardadas de forma privada en Supabase.");
       }
+      return true;
     };
     const scheduleProfileSave = () => {
       window.clearTimeout(cloudSaveTimer);
@@ -392,6 +500,40 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         .remove([profilePhotoPath(user)]);
       if (error) throw error;
     };
+    const loadProfileAvatar = async (user, path) => {
+      if (!path) {
+        profileAvatar.hidden = true;
+        profileAvatarPreview.hidden = true;
+        profileAvatarFallbacks.forEach(fallback => { fallback.hidden = false; });
+        return;
+      }
+      if (path !== profileAvatarPath(user)) {
+        throw new Error("La ruta de la foto de perfil no es válida.");
+      }
+      const { data, error } = await supabaseClient.storage
+        .from(profilePhotoBucket)
+        .createSignedUrl(path, 3600);
+      if (error) throw error;
+      if (profileAvatarUrl) URL.revokeObjectURL(profileAvatarUrl);
+      profileAvatarUrl = data.signedUrl;
+      [profileAvatar, profileAvatarPreview].forEach(image => {
+        image.src = profileAvatarUrl;
+        image.hidden = false;
+      });
+      profileAvatarFallbacks.forEach(fallback => { fallback.hidden = true; });
+    };
+    const uploadProfileAvatar = async (user, file) => {
+      const path = profileAvatarPath(user);
+      const { error } = await supabaseClient.storage
+        .from(profilePhotoBucket)
+        .upload(path, file, {
+          cacheControl: "3600",
+          contentType: file.type,
+          upsert: true,
+        });
+      if (error) throw error;
+      return path;
+    };
     const queueProfilePhotoSync = operation => {
       const task = profilePhotoSyncQueue.then(operation);
       profilePhotoSyncQueue = task.then(() => undefined, () => undefined);
@@ -400,7 +542,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const loadProfile = async user => {
       const { data, error } = await supabaseClient
         .from("user_profiles")
-        .select("bust, waist, hip, color_palette, remember_measurements, remember_photo, photo_path")
+        .select("email, first_name, last_name, phone, bust, waist, hip, color_palette, remember_measurements, remember_photo, photo_path, avatar_path")
         .eq("user_id", user.id)
         .maybeSingle();
       if (error) {
@@ -409,16 +551,47 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         throw error;
       }
       if (!data) {
-        showAccountStatus("Sesión iniciada. Activa «Recordar medidas» para sincronizar tus datos.");
+        profileFirstNameInput.value = user.user_metadata?.first_name || "";
+        profileLastNameInput.value = user.user_metadata?.last_name || "";
+        savedProfileFirstName = profileFirstNameInput.value;
+        savedProfileLastName = profileLastNameInput.value;
+        profileName.textContent = profileFirstNameInput.value || user.email || "Mi Perfil";
+        profileEmailInput.value = user.email || "";
+        showAccountStatus("Sesión iniciada. Completa tus datos de cuenta para guardarlos.");
         return false;
       }
+      profileEmailInput.value = data.email || user.email || "";
+      profileFirstNameInput.value = data.first_name || user.user_metadata?.first_name || "";
+      profileLastNameInput.value = data.last_name || user.user_metadata?.last_name || "";
+      savedProfileFirstName = profileFirstNameInput.value;
+      savedProfileLastName = profileLastNameInput.value;
+      profileName.textContent = profileFirstNameInput.value
+        || data.email || user.email || "Mi Perfil";
+      profilePhoneInput.value = (data.phone || "")
+        .replace(/^\+56 9 /, "").replace(" ", "");
+      profileAvatarPathValue = data.avatar_path || null;
+      await loadProfileAvatar(user, profileAvatarPathValue);
+      const profileMeasures = {
+        bust: data.bust,
+        waist: data.waist,
+        hip: data.hip,
+      };
+      [[profileBustInput, "bust"], [profileWaistInput, "waist"], [profileHipInput, "hip"]]
+        .forEach(([input, name]) => {
+          if (input) input.value = typeof profileMeasures[name] === "number"
+            ? String(profileMeasures[name])
+            : "";
+        });
       rememberCheckbox.checked = (
         data.remember_measurements === true || data.remember_photo === true
       );
       if (rememberCheckbox.checked) {
         measurementFields.forEach(field => {
-          if (typeof data[field.name] === "number") {
-            field.value = String(data[field.name]);
+          const value = typeof profileMeasures[field.name] === "number"
+            ? profileMeasures[field.name]
+            : data[field.name];
+          if (typeof value === "number") {
+            field.value = String(value);
             field.dispatchEvent(new Event("input", { bubbles: true }));
           }
         });
@@ -465,9 +638,26 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       signedInUser = user;
       setAuthControls(user);
       if (!user) {
-        if (previousUserId) pendingPhotoRemember = false;
+        if (previousUserId) {
+          pendingPhotoRemember = false;
+          window.dispatchEvent(new CustomEvent("matices:clear-account-data"));
+        }
+        savedProfileFirstName = "";
+        savedProfileLastName = "";
         rememberedPhotoPath = null;
-        showAccountStatus("No has iniciado sesión. Tus medidas pueden seguir guardándose en este navegador.");
+        rememberCheckbox.checked = false;
+        measurementFields.forEach(field => { field.value = ""; });
+        localStorage.removeItem(rememberedEnabledKey);
+        localStorage.removeItem(rememberedValuesKey);
+        showAccountStatus("Inicia sesión para sincronizar de forma privada tus medidas y paleta.");
+        finishAuthStateInitialization(false);
+        const view = new URLSearchParams(window.location.search).get("view");
+        if (["home", "try-on", "profile"].includes(view)) {
+          authReturnView = view;
+          window.location.replace(
+            `/?view=account&auth_mode=sign-in&return_view=${view}`,
+          );
+        }
         return;
       }
       showAccountStatus(`Sesión iniciada como ${user.email || "usuario"}. Recuperando perfil…`);
@@ -487,6 +677,10 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         }
         await saveProfile();
       }
+      finishAuthStateInitialization(true);
+      if (new URLSearchParams(window.location.search).get("view") === "account") {
+        window.location.assign(`/?view=${authReturnView}`);
+      }
     };
     const credentials = () => {
       const email = emailInput.value.trim();
@@ -495,12 +689,19 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         showAccountStatus("Ingresa un correo válido y una contraseña de al menos 8 caracteres.");
         return null;
       }
+      const firstName = signUpNameInput?.value.trim() || "";
+      const lastName = signUpLastNameInput?.value.trim() || "";
+      if (authMode === "sign-up" && (!firstName || !lastName)) {
+        showAccountStatus("Ingresa tu nombre y apellido para crear la cuenta.");
+        (firstName ? signUpLastNameInput : signUpNameInput).focus();
+        return null;
+      }
       if (authMode === "sign-up" && password !== confirmPasswordInput.value) {
         showAccountStatus("Las contraseñas no coinciden.");
         confirmPasswordInput.focus();
         return null;
       }
-      return { email, password };
+      return { email, password, firstName, lastName };
     };
     authModeButtons.forEach(button => {
       button.addEventListener("click", () => {
@@ -532,7 +733,10 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       if (!values || !supabaseClient) return;
       signInButton.disabled = true;
       try {
-        const { error } = await supabaseClient.auth.signInWithPassword(values);
+        const { error } = await supabaseClient.auth.signInWithPassword({
+          email: values.email,
+          password: values.password,
+        });
         if (error) {
           showAccountStatus(`No se pudo iniciar sesión: ${error.message}`);
           console.error("No se pudo iniciar sesión en Supabase.", error);
@@ -550,10 +754,15 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       signUpButton.disabled = true;
       try {
         const { data, error } = await supabaseClient.auth.signUp({
-          ...values,
+          email: values.email,
+          password: values.password,
           options: {
+            data: {
+              first_name: values.firstName,
+              last_name: values.lastName,
+            },
             emailRedirectTo: new URL(
-              "/?view=account&auth_mode=sign-in",
+              `/?view=account&auth_mode=sign-in&return_view=${authReturnView}`,
               window.location.origin,
             ).toString(),
           },
@@ -597,6 +806,75 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       }
     });
     rememberCheckbox?.addEventListener("change", scheduleProfileSave);
+    const formatProfilePhone = () => {
+      if (!profilePhoneInput) return;
+      const digits = profilePhoneInput.value.replace(/\D/g, "").slice(0, 8);
+      profilePhoneInput.value = digits.length > 4
+        ? `${digits.slice(0, 4)} ${digits.slice(4)}`
+        : digits;
+    };
+    profilePhoneInput?.addEventListener("input", formatProfilePhone);
+    saveProfileDataButton?.addEventListener("click", async () => {
+      if (!signedInUser || !supabaseClient) return;
+      const firstName = profileFirstNameInput.value.trim();
+      const lastName = profileLastNameInput.value.trim();
+      if (!firstName || !lastName) {
+        profileDataStatus.textContent = "El nombre y el apellido son obligatorios.";
+        return;
+      }
+      const phoneDigits = profilePhoneInput.value.replace(/\D/g, "");
+      if (phoneDigits && phoneDigits.length !== 8) {
+        profileDataStatus.textContent = "Ingresa los 8 dígitos de tu teléfono chileno.";
+        profilePhoneInput.focus();
+        return;
+      }
+      saveProfileDataButton.disabled = true;
+      profileDataStatus.textContent = "Guardando datos de tu cuenta…";
+      try {
+        measurementFields.forEach(field => {
+          const profileInput = {
+            bust: profileBustInput,
+            waist: profileWaistInput,
+            hip: profileHipInput,
+          }[field.name];
+          field.value = profileInput?.value || "";
+        });
+        rememberCheckbox.checked = true;
+        const saved = await saveProfile(true, true);
+        if (saved) {
+          profileDataStatus.textContent = "Datos guardados. Las medidas se sincronizaron con Tu Calce.";
+          measurementFields.forEach(field => {
+            field.dispatchEvent(new Event("input", { bubbles: true }));
+          });
+        }
+      } catch (error) {
+        profileDataStatus.textContent = `No se pudieron guardar los datos: ${error.message}`;
+        console.error("No se pudieron guardar los datos de cuenta.", error);
+      } finally {
+        saveProfileDataButton.disabled = false;
+      }
+    });
+    profileAvatarInput?.addEventListener("change", async () => {
+      const file = profileAvatarInput.files?.[0];
+      if (!file || !signedInUser || !supabaseClient) return;
+      const allowedTypes = new Set([
+        "image/jpeg", "image/png", "image/webp", "image/gif", "image/avif",
+      ]);
+      if (!allowedTypes.has(file.type) || file.size > 10 * 1024 * 1024) {
+        profileDataStatus.textContent = "Elige una imagen compatible de hasta 10 MB.";
+        profileAvatarInput.value = "";
+        return;
+      }
+      try {
+        profileAvatarPathValue = await uploadProfileAvatar(signedInUser, file);
+        await saveProfile();
+        await loadProfileAvatar(signedInUser, profileAvatarPathValue);
+        profileDataStatus.textContent = "Foto de perfil actualizada.";
+      } catch (error) {
+        profileDataStatus.textContent = `No se pudo actualizar la foto: ${error.message}`;
+        console.error("No se pudo guardar la foto de perfil.", error);
+      }
+    });
     window.addEventListener("matices:photo-selected", event => {
       latestSelectedPhoto = event.detail?.file;
       if (rememberPhotoInput.checked && !signedInUser) {
@@ -695,6 +973,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       signUpButton.disabled = true;
       signOutButton.hidden = true;
       showAccountStatus("Falta configurar SUPABASE_PUBLISHABLE_KEY en el entorno del servidor.");
+      finishAuthStateInitialization(false);
     } else {
       signInButton.disabled = true;
       signUpButton.disabled = true;
@@ -712,6 +991,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
             window.setTimeout(() => {
               handleAuthSession(session).catch(error => {
                 showAccountStatus(`No se pudo cargar el perfil: ${error.message}`);
+                finishAuthStateInitialization(Boolean(session?.user));
                 console.error("No se pudo procesar la sesión de Supabase.", error);
               });
             }, 0);
@@ -728,6 +1008,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
           signInButton.disabled = true;
           signUpButton.disabled = true;
           showAccountStatus(`No se pudo conectar con Supabase: ${error.message}`);
+          finishAuthStateInitialization(false);
           console.error("No se pudo inicializar Supabase.", error);
         });
     }
@@ -1141,6 +1422,8 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
           `Talla ${product.size}`,
         ].join(" · ");
         productOption.dataset.imageUrl = product.image_url;
+        productOption.dataset.price = product.price_clp ?? "";
+        productOption.dataset.store = product.store || "Tienda";
         return productOption;
       });
       const placeholder = document.createElement("option");
@@ -1201,6 +1484,162 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     }
     tryOnResult.hidden = true;
   });
+
+  const tryOnCartProducts = tryOnPanel?.querySelector("[data-vton-cart-products]");
+  const tryOnCartCount = tryOnPanel?.querySelector("[data-vton-cart-count]");
+  const tryOnCartOpenButton = tryOnPanel?.querySelector("[data-vton-open-cart]");
+  const tryOnCartPanel = tryOnPanel?.querySelector("[data-vton-cart]");
+  const tryOnCartItems = tryOnPanel?.querySelector("[data-vton-cart-items]");
+  const tryOnCartTotal = tryOnPanel?.querySelector("[data-vton-cart-total]");
+  const tryOnCartConfirmButton = tryOnPanel?.querySelector("[data-vton-confirm]");
+  const tryOnConfirmationPanel = tryOnPanel?.querySelector("[data-vton-confirmation]");
+  const tryOnConfirmationItems = tryOnPanel?.querySelector("[data-vton-confirmation-items]");
+  const tryOnConfirmationTotal = tryOnPanel?.querySelector("[data-vton-confirmation-total]");
+  const tryOnConfirmationStatus = tryOnPanel?.querySelector("[data-vton-confirmation-status]");
+  const tryOnCartStorageKey = "matices-vton-cart";
+  const selectedTryOnCartProducts = new Map();
+  const tryOnCurrency = new Intl.NumberFormat("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
+
+  const saveTryOnCart = () => {
+    try {
+      localStorage.setItem(
+        tryOnCartStorageKey,
+        JSON.stringify(Array.from(selectedTryOnCartProducts.values())),
+      );
+    } catch (error) {
+      console.error("No se pudo guardar el carrito del Probador.", error);
+      if (tryOnStatus) tryOnStatus.textContent = "No se pudo guardar el carrito en este navegador.";
+    }
+  };
+
+  try {
+    const savedCart = JSON.parse(localStorage.getItem(tryOnCartStorageKey) || "[]");
+    if (Array.isArray(savedCart)) {
+      savedCart.filter(product => product && typeof product.id === "string")
+        .forEach(product => selectedTryOnCartProducts.set(product.id, product));
+    }
+  } catch (error) {
+    console.error("No se pudo recuperar el carrito del Probador.", error);
+  }
+
+  const getTryOnCartProducts = () => Array.from(selectedTryOnCartProducts.values());
+
+  const renderTryOnCartProducts = () => {
+    if (!tryOnCartProducts || !tryOnProductSelect) return;
+    const availableProducts = Array.from(tryOnProductSelect.options)
+      .filter(option => option.value)
+      .map(option => ({
+        id: option.value,
+        label: option.textContent.trim(),
+        imageUrl: option.dataset.imageUrl || "",
+        price: Number(option.dataset.price) || null,
+        url: option.value,
+        store: option.dataset.store || "Tienda",
+      }));
+    tryOnCartProducts.replaceChildren(...availableProducts.map(product => {
+      const label = document.createElement("label");
+      label.className = "try-on-cart-product";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = product.id;
+      checkbox.checked = selectedTryOnCartProducts.has(product.id);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) selectedTryOnCartProducts.set(product.id, product);
+        else selectedTryOnCartProducts.delete(product.id);
+        saveTryOnCart();
+        updateTryOnCartCount();
+      });
+      const description = document.createElement("span");
+      description.textContent = `${product.label} · ${product.price
+        ? tryOnCurrency.format(product.price)
+        : "precio no disponible"}`;
+      label.append(checkbox, description);
+      return label;
+    }));
+    updateTryOnCartCount();
+  };
+
+  const updateTryOnCartCount = () => {
+    if (!tryOnCartCount || !tryOnCartOpenButton) return;
+    const count = selectedTryOnCartProducts.size;
+    tryOnCartCount.textContent = `${count} ${count === 1 ? "prenda" : "prendas"} en el carrito`;
+    tryOnCartOpenButton.disabled = count === 0;
+  };
+
+  const fillTryOnCartSummary = (list, totalElement) => {
+    const products = getTryOnCartProducts();
+    if (!list || !totalElement) return;
+    list.replaceChildren(...products.map(product => {
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = product.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = `${product.label} · ${product.store}`;
+      item.append(link);
+      return item;
+    }));
+    const total = products.reduce((sum, product) => sum + (product.price || 0), 0);
+    const hasMissingPrice = products.some(product => !product.price);
+    totalElement.textContent = hasMissingPrice
+      ? `Total parcial referencial: ${tryOnCurrency.format(total)}. Hay productos sin precio disponible.`
+      : `Total referencial: ${tryOnCurrency.format(total)}.`;
+  };
+
+  const showTryOnCartStage = stage => {
+    if (!tryOnPanel || !tryOnCartPanel || !tryOnConfirmationPanel) return;
+    const isSelection = stage === "selection";
+    [
+      tryOnPanel.querySelector(".try-on-person"),
+      tryOnProductSearch?.closest("label"),
+      tryOnProductSelect?.closest("label"),
+      tryOnPanel.querySelector(".try-on-garment-preview"),
+      tryOnGenerateButton,
+      tryOnStatus,
+      tryOnPanel.querySelector(".try-on-auth-note"),
+      tryOnResult,
+    ].filter(Boolean).forEach(element => { element.hidden = !isSelection; });
+    tryOnCartSelectionPanel.hidden = !isSelection;
+    tryOnCartPanel.hidden = stage !== "cart";
+    tryOnConfirmationPanel.hidden = stage !== "confirmation";
+    if (stage === "cart") {
+      fillTryOnCartSummary(tryOnCartItems, tryOnCartTotal);
+      if (tryOnCartConfirmButton) {
+        tryOnCartConfirmButton.disabled = selectedTryOnCartProducts.size === 0;
+      }
+    } else if (stage === "confirmation") {
+      fillTryOnCartSummary(tryOnConfirmationItems, tryOnConfirmationTotal);
+    }
+  };
+
+  const tryOnCartSelectionPanel = tryOnPanel?.querySelector("[data-vton-cart-selection]");
+  tryOnCartOpenButton?.addEventListener("click", () => showTryOnCartStage("cart"));
+  tryOnPanel?.querySelector("[data-vton-back-selection]")?.addEventListener(
+    "click",
+    () => showTryOnCartStage("selection"),
+  );
+  tryOnCartConfirmButton?.addEventListener("click", () => {
+    showTryOnCartStage("confirmation");
+  });
+  tryOnPanel?.querySelector("[data-vton-back-cart]")?.addEventListener(
+    "click",
+    () => showTryOnCartStage("cart"),
+  );
+  tryOnPanel?.querySelector("[data-vton-finish]")?.addEventListener("click", () => {
+    if (tryOnConfirmationStatus) {
+      tryOnConfirmationStatus.textContent = (
+        "Selección confirmada. Abre los enlaces de cada prenda para completar "
+        + "la compra directamente en la tienda."
+      );
+    }
+    showTryOnCartStage("confirmation");
+  });
+  tryOnProductSelect?.addEventListener("change", renderTryOnCartProducts);
+  updateTryOnCartCount();
 
   const fileAsBase64 = file => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1510,28 +1949,14 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
 
   const restoreRememberedPhoto = async () => {
     try {
-      if (localStorage.getItem(rememberedPhotoEnabledKey) !== "true") return;
-      rememberBox.checked = true;
-      const savedPhoto = await loadRememberedPhoto();
-      if (!savedPhoto?.blob) {
-        localStorage.removeItem(rememberedPhotoEnabledKey);
-        rememberBox.checked = false;
-        return;
-      }
-      const file = new File([savedPhoto.blob], savedPhoto.name || "foto-recordada", {
-        type: savedPhoto.type || savedPhoto.blob.type || "image/jpeg",
-        lastModified: savedPhoto.lastModified || Date.now(),
-      });
-      showSelectedPhoto(file, false);
-      rememberStatus.textContent = "Foto recuperada de este navegador.";
-      if (rememberBox.checked) {
-        window.dispatchEvent(new CustomEvent("matices:photo-selected", {
-          detail: { file },
-        }));
-      }
+      await window.calceAuthStateReady;
+      if (window.calceAuthenticated) return;
+      rememberBox.checked = false;
+      localStorage.removeItem(rememberedPhotoEnabledKey);
+      await deleteRememberedPhoto();
     } catch (error) {
-      rememberStatus.textContent = "No se pudo recuperar la foto guardada.";
-      console.error("No se pudo recuperar la foto recordada.", error);
+      rememberStatus.textContent = "No se pudo limpiar una foto local sin sesión.";
+      console.error("No se pudo limpiar una foto local de sesión anónima.", error);
     }
   };
 
@@ -1572,6 +1997,10 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     }
     setStatus("Imagen eliminada. Puedes elegir o tomar otra foto.");
   };
+
+  window.addEventListener("matices:clear-account-data", () => {
+    removeSelectedPhoto();
+  });
 
   const updateProgress = step => {
     const steps = Math.max(1, wizardSteps.length);
