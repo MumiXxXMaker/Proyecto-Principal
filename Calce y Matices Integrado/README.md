@@ -7,9 +7,8 @@ recomendaciones de calce y el catálogo de Calce.
 
 1. Toma una foto con la cámara del dispositivo o selecciona una imagen. Al
    avanzar, la aplicación analiza sus tonos en el navegador y muestra una paleta
-   recomendada con una explicación orientativa. Si activas **Recuérdame**, la
-   foto se conserva en este navegador; con una sesión iniciada también se guarda
-   en el almacenamiento privado de tu cuenta.
+   recomendada con una explicación orientativa. Con una sesión iniciada puedes
+   guardar la foto en el almacenamiento privado de tu cuenta.
 2. Ingresa busto, cintura y cadera, y elige tu preferencia de calce y las
    prendas que quieres explorar. Las recomendaciones se calculan con tus
    medidas y el calce elegido.
@@ -58,18 +57,22 @@ en Supabase, no en el disco temporal de Render.
 
 ## Conexión con Supabase
 
-La app puede crear cuentas por correo, iniciar sesión y sincronizar las medidas
-y la paleta. Al activar **Recuérdame** en el paso de la foto con una sesión
-iniciada, se vinculan a la cuenta la foto, las medidas y la paleta; al volver a
-iniciar sesión se recuperan automáticamente. Las fotos se guardan en un bucket
-privado de Supabase Storage, con acceso limitado a la cuenta propietaria. Se
-admiten fotos JPEG, PNG, WebP, GIF o AVIF de hasta 10 MB.
-Sin sesión, las medidas y las fotos recordadas permanecen solo en el navegador.
+La app permite crear cuentas con nombre y apellido, iniciar sesión y editar en
+**Datos de Cuenta** el nombre, apellido, teléfono y medidas. Las medidas guardadas
+en el perfil se sincronizan con Tu Calce. El teléfono se guarda como `+56 9 XXXX
+XXXX`. **Forma de Pago** es informativa: Calce no almacena datos de tarjetas ni
+procesa pagos. La compra se completa directamente en la tienda de cada prenda.
+Al activar **Recuérdame** en el paso de la foto con una sesión iniciada, la foto
+y la paleta se guardan en la cuenta. Las fotos de perfil y de Tu Calce se guardan
+en un bucket privado de Supabase Storage, con acceso limitado a la persona
+propietaria; se admiten fotos JPEG, PNG, WebP, GIF o AVIF de hasta 10 MB. Sin
+sesión, Tu Calce y el Probador solicitan iniciar sesión y conservan el destino.
 
 1. En el panel SQL de Supabase, ejecuta [`supabase/schema.sql`](./supabase/schema.sql).
-   El esquema actualiza la tabla de perfiles, crea el bucket privado y limita
-   mediante RLS el acceso a cada perfil y sus fotos. Si ya ejecutaste una versión
-   anterior, vuelve a ejecutar el archivo completo.
+   El esquema actualiza la tabla de perfiles, sincroniza el correo desde Auth,
+   crea el bucket privado y limita mediante RLS el acceso a cada perfil y sus
+   fotos. Si ya ejecutaste una versión anterior, vuelve a ejecutar el archivo
+   completo.
 2. En la configuración API del proyecto, copia la **publishable key** (o la
    antigua clave `anon`). No uses la clave `service_role`.
 3. Copia `.env.example` como `.env` en la raíz del proyecto y pega allí la
@@ -90,9 +93,11 @@ Sin sesión, las medidas y las fotos recordadas permanecen solo en el navegador.
    confirmar el correo, revisa el mensaje de confirmación antes de iniciar
    sesión. En el inicio de sesión, **Recuérdame** conserva la sesión entre
    visitas; si lo dejas desmarcado, la sesión termina al cerrar la pestaña.
-   Activa **Recordar medidas** para sincronizar las medidas y la paleta.
-   **Recuérdame** en el paso de la foto guarda una copia privada en tu cuenta;
-   desactivar la opción o eliminar la foto también la borra de Supabase.
+   Activa **Recordar medidas en mi cuenta** para sincronizar medidas y paleta.
+   **Recordar foto en mi cuenta** guarda una copia privada de la foto;
+   desactivar la opción o eliminar la foto también la borra de Supabase. En
+   **Mi Perfil → Datos de Cuenta**, guarda tus datos y medidas; en **Forma de
+   Pago**, la gestión de tarjetas permanece deshabilitada.
 5. Si la confirmación por correo está activada, agrega la URL local de la app
    (por ejemplo `http://127.0.0.1:4173/**`) a **Authentication → URL
    Configuration → Redirect URLs** en Supabase.
@@ -114,9 +119,8 @@ servidor.
 - `prendas/`: modelo de prenda, catálogo y repositorio Excel.
 - `metricas/`: cálculo de holguras, puntuación y diagnóstico.
 - `web/`: servidor, plantilla HTML, estilos y recursos de interfaz.
-- Las ventanas de bienvenida usan la fuente Rye, incluida en `web/assets/` bajo
-  licencia SIL Open Font License; su serif vintage es una alternativa visual,
-  no la fuente exacta Fashion Modish de la imagen de referencia.
+- La interfaz usa el isotipo de Calce, una paleta azul/coral/magenta y la
+  tipografía Montserrat.
 - `data/Matriz_Medidas_Marcas_Vestua.xlsx`: fuente de productos y variables.
 - `data/vestua_images.json`: imágenes de referencia y enlaces a Vestua por marca y categoría.
 - `data/vestua_catalog.json`: instantánea de publicaciones únicas de Vestua con título, categoría, talla, precio y URL.
@@ -180,8 +184,9 @@ para una combinación, esa referencia no se recomienda.
 Junto a cada imagen también se muestra la talla indicada en su publicación
 en Vestua; puede ser distinta de la prenda del Excel y cambiar si la publicación
 se actualiza.
-Los enlaces **Inicio** y **Catálogo** abren vistas separadas; el catálogo
-muestra los productos con imagen de las instantáneas de Vestua, Tricot y Paris.
+La vista **Home** presenta categorías y productos destacados; **Tu Calce**,
+**Catálogo**, **Probador** e **Info** abren secciones independientes. El catálogo
+muestra productos con imagen de las instantáneas de Vestua, Tricot y Paris.
 Muestra nueve prendas
 por página (3 columnas × 3 filas en
 pantallas amplias), con búsqueda, filtro por tipo, paginación y orden por precio

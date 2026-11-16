@@ -3,40 +3,57 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f6f4ef">
+  <meta name="theme-color" content="#f4f8fc">
   <meta name="supabase-url" content="{supabase_url}">
   <meta name="supabase-publishable-key" content="{supabase_publishable_key}">
   <title>Calce — recomendaciones por medidas</title>
-  <link rel="stylesheet" href="/styles.css?v=wizard-30">
+  <link rel="stylesheet" href="/styles.css?v=brand-home-1">
 </head>
 <body>
   <header><div class="wrap nav">
-    <div class="brandmark"><span class="mark">c</span> calce</div>
-    <div class="nav-note">Una mejor compra empieza por conocerte.</div>
+    <a class="brandmark" href="{storefront_url}" aria-label="Calce, probador online">
+      <img src="/assets/calce-isotipo.png" alt="">
+      <span class="brandmark-copy">
+        <span class="brandmark-name">calce</span>
+        <span class="brandmark-tagline">PROBADOR ONLINE</span>
+      </span>
+    </a>
+    <nav class="page-tabs" aria-label="Secciones principales">
+      <a id="storefront-link" href="{storefront_url}"{storefront_link_current}>Home</a>
+      <a id="home-link" href="{home_tab_url}"{home_link_current}>Tu Calce</a>
+      <a id="catalog-link" href="{catalog_tab_url}"{catalog_link_current}>Catálogo</a>
+      <a id="try-on-link" href="{try_on_tab_url}"{try_on_link_current}>Probador</a>
+      <a id="info-link" href="{info_tab_url}"{info_link_current}>Info</a>
+    </nav>
     <div class="nav-actions">
-      <nav class="page-tabs" aria-label="Secciones principales">
+      <div class="nav-account-links">
         <a class="nav-auth-button" href="{sign_in_url}" data-open-account="sign-in"{sign_in_link_current}>Iniciar sesión</a>
         <a class="nav-auth-button nav-auth-button-primary" href="{sign_up_url}" data-open-account="sign-up"{sign_up_link_current}>Crear cuenta</a>
-        <a id="home-link" href="{home_tab_url}"{home_link_current}>Inicio</a>
-        <a id="catalog-link" href="{catalog_tab_url}"{catalog_link_current}>Catálogo</a>
-        <a id="try-on-link" href="{try_on_tab_url}"{try_on_link_current}>Probador</a>
-      </nav>
+      </div>
       <details class="profile-menu" data-profile-menu hidden>
         <summary aria-label="Abrir menú de perfil">
-          <span class="profile-menu-avatar" aria-hidden="true">c</span>
-          <span>Mi perfil</span>
+          <span class="profile-menu-avatar" data-profile-avatar-fallback aria-hidden="true">c</span>
+          <img class="profile-menu-avatar profile-menu-avatar-image" data-profile-avatar
+            alt="" hidden>
+          <span data-profile-name>Mi Perfil</span>
           <span class="profile-menu-chevron" aria-hidden="true">⌄</span>
         </summary>
         <div class="profile-menu-content">
           <p data-profile-email hidden></p>
-          <a href="/?wizard_step=2" data-profile-edit hidden>Modificar perfil</a>
+          <a href="/?view=profile#profile-account-data" data-profile-account hidden>Datos de Cuenta</a>
+          <a href="/?view=profile#profile-payment" data-profile-payment hidden>Forma de Pago</a>
+          <a href="/?view=home" data-profile-edit hidden>Tu Calce</a>
           <button type="button" data-supabase-sign-out hidden>Cerrar sesión</button>
         </div>
       </details>
     </div>
   </div></header>
   {startup_dialogs}
-  <main><div class="wrap">
+  <main>
+    <section id="storefront-panel" data-page-panel="storefront"{storefront_panel_hidden}>
+      {storefront_content}
+    </section>
+    <div class="wrap">
     <div id="home-panel" data-page-panel="home"{home_panel_hidden}>
     <section id="style-wizard" class="style-wizard" aria-labelledby="wizard-title">
       <div class="wizard-shell">
@@ -87,9 +104,9 @@
                   aria-label="Eliminar imagen" title="Eliminar imagen">−</button>
               </div>
               <div class="matices-remember" id="matices-remember-row" hidden>
-                <label for="matices-remember"><input id="matices-remember" type="checkbox"> Recuérdame</label>
+                <label for="matices-remember"><input id="matices-remember" type="checkbox" disabled> Recordar foto en mi cuenta</label>
                 <span id="matices-remember-status" role="status" aria-live="polite"></span>
-                <small>Con una cuenta iniciada, la foto, las medidas y la paleta se vinculan a tu cuenta y se recuperan al volver a entrar. Sin sesión, se conservan en este dispositivo.</small>
+                <small>Con una cuenta iniciada, la foto, las medidas y la paleta se guardan de forma privada y se recuperan al volver a entrar.</small>
               </div>
               <p id="matices-status" class="matices-status" aria-live="polite">La foto se analiza al presionar Siguiente.</p>
             </div>
@@ -107,7 +124,7 @@
             <section class="wizard-filters" aria-label="Medidas corporales">
               <div class="measurements">{measurement_fields}</div>
               <div class="remember-me">
-                <label for="remember-me"><input id="remember-me" type="checkbox"> Recordar medidas</label>
+                <label for="remember-me"><input id="remember-me" type="checkbox" disabled> Recordar medidas en mi cuenta</label>
                 <span id="remember-status" role="status" aria-live="polite"></span>
               </div>
               <div class="wizard-actions">
@@ -182,6 +199,16 @@
                 data-auth-mode="sign-up" aria-pressed="false">Crear cuenta</button>
             </div>
             <div class="supabase-auth-fields">
+              <label class="supabase-sign-up-only" data-sign-up-only for="supabase-name" hidden>
+                Nombre
+                <input id="supabase-name" type="text" autocomplete="given-name"
+                  maxlength="80" required disabled>
+              </label>
+              <label class="supabase-sign-up-only" data-sign-up-only for="supabase-last-name" hidden>
+                Apellido
+                <input id="supabase-last-name" type="text" autocomplete="family-name"
+                  maxlength="80" required disabled>
+              </label>
               <label for="supabase-email">Correo electrónico
                 <input id="supabase-email" type="email" autocomplete="email"
                   placeholder="tu@correo.com" required>
@@ -198,7 +225,7 @@
             </div>
             <label class="supabase-remember-session" data-remember-session-row for="supabase-remember-session">
               <input id="supabase-remember-session" type="checkbox">
-              <span>Recuérdame</span>
+              <span>Recordar</span>
             </label>
             <div class="supabase-auth-actions">
               <button class="matices-button matices-button-primary" type="button"
@@ -233,11 +260,76 @@
       </details>
     </section>
     </div>
+    <section id="info-panel" data-page-panel="info"{info_panel_hidden}
+      aria-labelledby="fit-info-title">
+      {fit_information_content}
+    </section>
     <section id="catalog-panel" data-page-panel="catalog"{catalog_panel_hidden}>
       {garment_catalog}
     </section>
     <section id="try-on-panel" data-page-panel="try-on"{try_on_panel_hidden}>
       {aiuta_try_on_panel}
+    </section>
+    <section id="profile-panel" data-page-panel="profile"{profile_panel_hidden}>
+      <div class="profile-page" data-profile-page>
+        <header class="profile-page-heading">
+          <span class="eyebrow">Mi Perfil</span>
+          <h1>Datos de Cuenta</h1>
+        </header>
+        <section id="profile-account-data" class="profile-card"
+          aria-labelledby="profile-account-title">
+          <h2 id="profile-account-title">Datos de Cuenta</h2>
+          <div class="profile-avatar-editor">
+            <span class="profile-avatar-fallback" data-profile-avatar-fallback aria-hidden="true">c</span>
+            <img data-profile-avatar-preview alt="Foto de perfil" hidden>
+            <label class="matices-button profile-avatar-button" for="profile-avatar-input">
+              Cambiar foto de perfil
+              <input id="profile-avatar-input" type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif,image/avif">
+            </label>
+          </div>
+          <div class="profile-form-grid">
+            <label for="profile-email">Correo electrónico
+              <input id="profile-email" type="email" autocomplete="email" disabled>
+            </label>
+            <label for="profile-first-name">Nombre
+              <input id="profile-first-name" type="text" maxlength="80"
+                autocomplete="given-name" disabled>
+            </label>
+            <label for="profile-last-name">Apellido
+              <input id="profile-last-name" type="text" maxlength="80"
+                autocomplete="family-name" disabled>
+            </label>
+            <label class="profile-phone-field" for="profile-phone">Teléfono chileno
+              <span class="profile-phone-input"><span aria-hidden="true">+56 9</span>
+                <input id="profile-phone" type="text" inputmode="numeric" maxlength="9"
+                  placeholder="1234 5678" autocomplete="tel-national" disabled>
+              </span>
+            </label>
+            <label for="profile-bust">Busto/Pecho (cm)
+              <input id="profile-bust" type="number" min="40" max="200" step="0.5" disabled>
+            </label>
+            <label for="profile-waist">Cintura (cm)
+              <input id="profile-waist" type="number" min="40" max="180" step="0.5" disabled>
+            </label>
+            <label for="profile-hip">Cadera (cm)
+              <input id="profile-hip" type="number" min="40" max="200" step="0.5" disabled>
+            </label>
+          </div>
+          <button class="matices-button matices-button-primary" type="button"
+            data-save-profile-data disabled>Guardar datos</button>
+          <p class="profile-data-status" data-profile-data-status role="status"
+            aria-live="polite"></p>
+        </section>
+        <section id="profile-payment" class="profile-card"
+          aria-labelledby="profile-payment-title">
+          <h2 id="profile-payment-title">Forma de Pago</h2>
+          <p class="profile-payment-placeholder">La gestión de tarjetas aún no está habilitada.
+            Las compras se completan directamente en la tienda de cada prenda.</p>
+          <button class="matices-button" type="button" disabled>
+            Agregar tarjeta (próximamente)</button>
+        </section>
+      </div>
     </section>
   </div></main>
   <script src="/app.js?v=wizard-35-aiuta-photo" defer></script>
