@@ -29,6 +29,19 @@ const readJsonResponse = async (response, endpoint) => {
   }
 };
 
+const catalogSelectionStorageKey = "calce-selected-catalog-garments";
+const readSelectedCatalogGarments = () => {
+  const savedSelection = sessionStorage.getItem(catalogSelectionStorageKey);
+  if (!savedSelection) return [];
+  const products = JSON.parse(savedSelection);
+  if (!Array.isArray(products)) return [];
+  return products.filter(product =>
+    product &&
+    typeof product.product_url === "string" &&
+    product.product_url,
+  );
+};
+
 document.querySelectorAll(".product-image").forEach(image => {
   image.addEventListener("error", () => {
     const link = image.closest(".product-image-link");
@@ -228,6 +241,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const signUpButton = document.querySelector("[data-supabase-sign-up]");
     const signOutButton = document.querySelector("[data-supabase-sign-out]");
     const profileMenu = document.querySelector("[data-profile-menu]");
+    const profileGreeting = document.querySelector("[data-profile-greeting]");
     const profileEmail = document.querySelector("[data-profile-email]");
     const profileEditLink = document.querySelector("[data-profile-edit]");
     const profileAccountLink = document.querySelector("[data-profile-account]");
@@ -290,10 +304,20 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const showAccountStatus = message => {
       accountStatus.textContent = message;
     };
+    const updateProfileGreeting = (firstName, lastName) => {
+      if (!profileGreeting) return;
+      const fullName = [firstName, lastName]
+        .filter(value => typeof value === "string")
+        .map(value => value.trim())
+        .filter(Boolean)
+        .join(" ");
+      profileGreeting.textContent = fullName ? `Bienvenido\n${fullName}` : "Bienvenido";
+    };
     const setAuthControls = user => {
       window.calceAuthenticated = Boolean(user);
       authForm.hidden = Boolean(user);
       profileMenu.hidden = !user;
+      profileGreeting.hidden = !user;
       signOutButton.hidden = !user;
       profileEditLink.hidden = !user;
       profileAccountLink.hidden = !user;
@@ -306,6 +330,10 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       if (rememberPhotoInput) rememberPhotoInput.disabled = !user;
       profileName.textContent = user?.user_metadata?.first_name
         || user?.email || "Mi Perfil";
+      updateProfileGreeting(
+        user?.user_metadata?.first_name,
+        user?.user_metadata?.last_name,
+      );
       if (profileEmailInput) {
         profileEmailInput.disabled = true;
         profileEmailInput.value = user?.email || "";
@@ -465,6 +493,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         savedProfileFirstName = firstName;
         savedProfileLastName = lastName;
         profileName.textContent = firstName || signedInUser.email || "Mi Perfil";
+        updateProfileGreeting(firstName, lastName);
       }
       return true;
     };
@@ -563,6 +592,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         savedProfileFirstName = profileFirstNameInput.value;
         savedProfileLastName = profileLastNameInput.value;
         profileName.textContent = profileFirstNameInput.value || user.email || "Mi Perfil";
+        updateProfileGreeting(savedProfileFirstName, savedProfileLastName);
         profileEmailInput.value = user.email || "";
         showAccountStatus("Sesión iniciada. Completa tus datos de cuenta para guardarlos.");
         return false;
@@ -574,6 +604,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       savedProfileLastName = profileLastNameInput.value;
       profileName.textContent = profileFirstNameInput.value
         || data.email || user.email || "Mi Perfil";
+      updateProfileGreeting(savedProfileFirstName, savedProfileLastName);
       profilePhoneInput.value = (data.phone || "")
         .replace(/^\+56 9 /, "").replace(" ", "");
       profileAvatarPathValue = data.avatar_path || null;
@@ -1063,64 +1094,120 @@ document.querySelectorAll("[data-carousel]").forEach(carousel => {
 document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const sortSelect = catalog.querySelector("[data-catalog-sort]");
   const itemsContainer = catalog.querySelector("[data-catalog-items]");
-  const searchInput = catalog.querySelector("[data-catalog-search]");
+  const searchForm = catalog.querySelector("[data-catalog-search-form]");
+  const searchInput = searchForm?.querySelector("[data-catalog-search]");
   const typeFilter = catalog.querySelector("[data-catalog-type-filter]");
+  const sizeFilter = catalog.querySelector("[data-catalog-size-filter]");
+  const brandFilter = catalog.querySelector("[data-catalog-brand-filter]");
+  const minPriceFilter = catalog.querySelector("[data-catalog-min-price]");
+  const maxPriceFilter = catalog.querySelector("[data-catalog-max-price]");
   const resultCount = catalog.querySelector("[data-catalog-result-count]");
   const selectionStatus = catalog.querySelector("[data-catalog-selection-status]");
-  const compareButton = catalog.querySelector("[data-catalog-compare]");
-  const comparison = catalog.querySelector("[data-catalog-comparison]");
-  const comparisonItems = catalog.querySelector("[data-catalog-comparison-items]");
-  const totalLabel = catalog.querySelector("[data-catalog-total]");
+  const tryOnButton = catalog.querySelector("[data-catalog-try-on]");
   const pagination = catalog.querySelector("[data-catalog-pagination]");
-  let items = Array.from(catalog.querySelectorAll("[data-catalog-card]"));
   const previousPageButton = catalog.querySelector("[data-catalog-previous]");
   const nextPageButton = catalog.querySelector("[data-catalog-next]");
   const pageLabel = catalog.querySelector("[data-catalog-page]");
+  const catalogPagePanel = catalog.closest('[data-page-panel="catalog"]');
+  const catalogViewActive = Boolean(catalogPagePanel && !catalogPagePanel.hidden);
+  const infoLink = document.getElementById("info-link");
+  if (searchForm) {
+    if (catalogViewActive) {
+      searchForm.classList.add("catalog-search-form--catalog");
+      catalog.querySelector(".catalog-main")?.prepend(searchForm);
+    } else if (infoLink) {
+      searchForm.classList.add("catalog-search-form--nav");
+      infoLink.after(searchForm);
+    }
+  }
 
   if (
     !sortSelect || !itemsContainer || !searchInput ||
-    !typeFilter || !resultCount || !selectionStatus ||
-    !compareButton || !comparison || !comparisonItems || !totalLabel ||
+    !searchForm || !typeFilter || !sizeFilter || !brandFilter ||
+    !minPriceFilter || !maxPriceFilter || !resultCount ||
+    !selectionStatus || !tryOnButton ||
     !pagination || !previousPageButton || !nextPageButton || !pageLabel
   ) {
     return;
   }
 
   let currentPage = Number(catalog.dataset.catalogPageIndex) || 0;
-  const selectedCards = new Map();
+  const selectedCatalogGarments = new Map(
+    readSelectedCatalogGarments().map(product => [product.product_url, product]),
+  );
   let requestNumber = 0;
   let activeController;
   let searchTimer;
 
-  const selectedItems = () => Array.from(selectedCards.values());
   const updateSelection = () => {
-    const selected = selectedItems();
-    selectionStatus.textContent = selected.length === 0
-      ? "Ninguna prenda seleccionada"
-      : `${selected.length} ${selected.length === 1 ? "prenda seleccionada" : "prendas seleccionadas"}`;
-    compareButton.disabled = selected.length === 0;
-    compareButton.textContent = selected.length
-      ? "Comparar"
-      : "Selecciona Productos a Comparar";
+    const count = selectedCatalogGarments.size;
+    selectionStatus.textContent = count
+      ? `${count} ${count === 1 ? "prenda seleccionada" : "prendas seleccionadas"} para el Probador`
+      : "Ninguna prenda seleccionada";
+    tryOnButton.disabled = count === 0;
+    tryOnButton.textContent = count ? "Probar" : "Selecciona prendas para probarte";
   };
-  const deselectCard = productId => {
-    selectedCards.delete(productId);
-    const card = items.find(candidate => candidate.dataset.catalogId === productId);
-    const checkbox = card?.querySelector("[data-catalog-select]");
-    if (checkbox) checkbox.checked = false;
-    updateSelection();
-    if (!comparison.hidden) renderComparison();
-  };
+
   const bindCard = item => {
-    const productId = item.dataset.catalogId;
     const checkbox = item.querySelector("[data-catalog-select]");
-    if (checkbox && productId) {
-      checkbox.checked = selectedCards.has(productId);
+    if (checkbox) {
+      const productUrl = item.querySelector(".catalog-buy-link")?.href;
+      const productName = item.querySelector(".catalog-item-info h3")?.textContent?.trim();
+      checkbox.checked = Boolean(productUrl && selectedCatalogGarments.has(productUrl));
+      if (productName) {
+        checkbox.setAttribute(
+          "aria-label",
+          checkbox.checked
+            ? `Quitar ${productName} del Probador`
+            : `Seleccionar ${productName} para el Probador`,
+        );
+      }
       checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selectedCards.set(productId, item.cloneNode(true));
-        else selectedCards.delete(productId);
-        updateSelection();
-        if (!comparison.hidden) renderComparison();
+        const productLink = item.querySelector(".catalog-buy-link");
+        if (!productLink || !productName) {
+          checkbox.checked = false;
+          resultCount.textContent = "No se pudo identificar la prenda seleccionada.";
+          return;
+        }
+
+        const selectedUrl = productLink.href;
+        const previousProduct = selectedCatalogGarments.get(selectedUrl);
+        if (checkbox.checked) {
+          selectedCatalogGarments.set(selectedUrl, {
+            product_url: selectedUrl,
+            image_url: item.querySelector(".catalog-image")?.src || "",
+            store: item.dataset.catalogStore || "",
+            brand: item.dataset.catalogBrand || "",
+            title: productName,
+            size: item.dataset.catalogSize || "",
+          });
+        } else {
+          selectedCatalogGarments.delete(selectedUrl);
+        }
+
+        try {
+          sessionStorage.setItem(
+            catalogSelectionStorageKey,
+            JSON.stringify(Array.from(selectedCatalogGarments.values())),
+          );
+          checkbox.setAttribute(
+            "aria-label",
+            checkbox.checked
+              ? `Quitar ${productName} del Probador`
+              : `Seleccionar ${productName} para el Probador`,
+          );
+          updateSelection();
+        } catch (error) {
+          if (previousProduct) {
+            selectedCatalogGarments.set(selectedUrl, previousProduct);
+          } else {
+            selectedCatalogGarments.delete(selectedUrl);
+          }
+          checkbox.checked = Boolean(previousProduct);
+          updateSelection();
+          resultCount.textContent = "No se pudo guardar la selección para el Probador.";
+          console.error("No se pudo guardar la selección del catálogo.", error);
+        }
       });
     }
 
@@ -1129,124 +1216,14 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     image.addEventListener(
       "error",
       () => {
-        selectedCards.delete(productId);
-        items = items.filter(candidate => candidate !== item);
         item.remove();
-        updateSelection();
-        if (!comparison.hidden) renderComparison();
       },
       { once: true },
     );
     if (image.complete && image.naturalWidth === 0) image.dispatchEvent(new Event("error"));
   };
-  const renderComparison = () => {
-    const selected = selectedItems();
-    comparisonItems.replaceChildren();
-    if (!selected.length) {
-      comparison.hidden = true;
-      compareButton.textContent = "Compara prendas";
-      updateSelection();
-      return;
-    }
-
-    const table = document.createElement("table");
-    table.className = "catalog-comparison-table";
-    const caption = document.createElement("caption");
-    caption.textContent = "Detalles, tallas y medidas de las prendas seleccionadas";
-    const tableWrap = document.createElement("div");
-    tableWrap.className = "catalog-comparison-table-wrap";
-    table.append(caption);
-    tableWrap.append(table);
-
-    const head = document.createElement("thead");
-    const headerRow = document.createElement("tr");
-    const detailHeading = document.createElement("th");
-    detailHeading.scope = "col";
-    detailHeading.textContent = "Detalle";
-    headerRow.append(detailHeading);
-    selected.forEach(item => {
-      const heading = document.createElement("th");
-      heading.scope = "col";
-      const headerContent = document.createElement("div");
-      headerContent.className = "catalog-comparison-header";
-      const productLink = document.createElement("a");
-      productLink.href = item.querySelector(".catalog-buy-link")?.href ?? "#";
-      productLink.target = "_blank";
-      productLink.rel = "noopener noreferrer";
-      productLink.textContent = item.querySelector(".catalog-item-info h3")?.textContent ?? "Prenda";
-      const removeButton = document.createElement("button");
-      const productName = item.querySelector(".catalog-item-info h3")?.textContent?.trim() || "Prenda";
-      removeButton.type = "button";
-      removeButton.className = "catalog-comparison-remove";
-      removeButton.title = `Quitar ${productName} de la comparación`;
-      removeButton.setAttribute("aria-label", `Quitar ${productName} de la comparación`);
-      removeButton.textContent = "−";
-      removeButton.addEventListener("click", () => deselectCard(item.dataset.catalogId));
-      headerContent.append(productLink, removeButton);
-      heading.append(headerContent);
-      headerRow.append(heading);
-    });
-    head.append(headerRow);
-    table.append(head);
-
-    const body = document.createElement("tbody");
-    const makeRow = (label, readValue) => {
-      const row = document.createElement("tr");
-      const heading = document.createElement("th");
-      heading.scope = "row";
-      heading.textContent = label;
-      row.append(heading);
-      selected.forEach(item => {
-        const cell = document.createElement("td");
-        cell.textContent = readValue(item);
-        row.append(cell);
-      });
-      body.append(row);
-    };
-    const measurementFor = (item, name, field) => {
-      const measurement = Array.from(
-        item.querySelectorAll("[data-comparison-measure]")
-      ).find(entry => entry.dataset.comparisonMeasure === name);
-      return measurement?.dataset[field] ?? "No disponible";
-    };
-
-    makeRow("Tienda", item => item.dataset.catalogStore || "No indicada");
-    makeRow(
-      "Marca y tipo",
-      item => `${item.dataset.catalogBrand || "No indicada"} · ${item.dataset.catalogType || "Ropa"}`
-    );
-    makeRow("Talla publicada", item => item.dataset.catalogSize || "No indicada");
-    makeRow(
-      "Precio publicado",
-      item => item.querySelector(".catalog-price")?.textContent ?? "No disponible"
-    );
-    makeRow("Calce estimado", item => item.dataset.catalogFitLabel || "Sin estimación");
-    makeRow("Busto · prenda", () => "No informado en la ficha");
-    makeRow("Busto · cuerpo", item => item.dataset.catalogBust || "No ingresado");
-    makeRow("Cintura · prenda", item => measurementFor(item, "Cintura", "measureGarment"));
-    makeRow("Cintura · cuerpo", item => measurementFor(item, "Cintura", "measureBody"));
-    makeRow("Holgura · cintura", item => measurementFor(item, "Cintura", "measureEase"));
-    makeRow("Cadera · prenda", item => measurementFor(item, "Cadera", "measureGarment"));
-    makeRow("Cadera · cuerpo", item => measurementFor(item, "Cadera", "measureBody"));
-    makeRow("Holgura · cadera", item => measurementFor(item, "Cadera", "measureEase"));
-    makeRow("Referencia de medidas", item => item.dataset.catalogReference || "Sin referencia");
-    table.append(body);
-    comparisonItems.append(tableWrap);
-
-    let total = 0;
-    let allPricesAvailable = true;
-    selected.forEach(item => {
-      const price = Number(item.dataset.catalogPrice);
-      if (Number.isFinite(price) && price > 0) total += price;
-      else allPricesAvailable = false;
-    });
-    totalLabel.textContent = allPricesAvailable
-      ? `Total referencial de la selección: $${total.toLocaleString("es-CL")} CLP`
-      : "Total no disponible: una o más prendas no tienen precio publicado en los datos consultados.";
-    comparison.hidden = false;
-    compareButton.textContent = "Ocultar comparación";
-  };
-  items.forEach(bindCard);
+  catalog.querySelectorAll("[data-catalog-card]").forEach(bindCard);
+  updateSelection();
 
   const loadPage = async page => {
     const requestId = ++requestNumber;
@@ -1255,6 +1232,10 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     const params = new URLSearchParams(window.location.search);
     params.set("search", searchInput.value.trim());
     params.set("type", typeFilter.value);
+    params.set("size", sizeFilter.value);
+    params.set("brand", brandFilter.value);
+    params.set("min_price", minPriceFilter.value);
+    params.set("max_price", maxPriceFilter.value);
     params.set("sort", sortSelect.value);
     params.set("page", String(page));
 
@@ -1270,7 +1251,6 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       const template = document.createElement("template");
       template.innerHTML = data.cards;
       itemsContainer.replaceChildren(template.content);
-      items = Array.from(itemsContainer.querySelectorAll("[data-catalog-card]"));
       currentPage = data.page;
       catalog.dataset.catalogPageIndex = String(currentPage);
       resultCount.textContent = data.result_text;
@@ -1278,9 +1258,8 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       previousPageButton.disabled = currentPage === 0;
       nextPageButton.disabled = currentPage >= data.pages - 1;
       pagination.hidden = data.pages <= 1;
-      items.forEach(bindCard);
+      itemsContainer.querySelectorAll("[data-catalog-card]").forEach(bindCard);
       updateSelection();
-      if (!comparison.hidden) renderComparison();
     } catch (error) {
       if (error.name === "AbortError") return;
       resultCount.textContent = "No se pudo cargar el catálogo. Inténtalo nuevamente.";
@@ -1289,11 +1268,17 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   };
 
   sortSelect.addEventListener("change", () => loadPage(0));
-  searchInput.addEventListener("input", () => {
-    window.clearTimeout(searchTimer);
-    searchTimer = window.setTimeout(() => loadPage(0), 250);
-  });
   typeFilter.addEventListener("change", () => loadPage(0));
+  sizeFilter.addEventListener("change", () => loadPage(0));
+  brandFilter.addEventListener("change", () => loadPage(0));
+  minPriceFilter.addEventListener("change", () => loadPage(0));
+  maxPriceFilter.addEventListener("change", () => loadPage(0));
+  searchForm.addEventListener("submit", event => {
+    if (!catalogViewActive) return;
+    event.preventDefault();
+    window.clearTimeout(searchTimer);
+    loadPage(0);
+  });
   previousPageButton.addEventListener("click", () => {
     loadPage(currentPage - 1);
     catalog.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1302,16 +1287,18 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     loadPage(currentPage + 1);
     catalog.scrollIntoView({ behavior: "smooth", block: "start" });
   });
-  compareButton.addEventListener("click", () => {
-    if (comparison.hidden) {
-      renderComparison();
-    } else {
-      comparison.hidden = true;
-      compareButton.textContent = "Comparar prendas";
-      updateSelection();
-    }
+  tryOnButton.addEventListener("click", () => {
+    if (!selectedCatalogGarments.size) return;
+    window.location.assign(
+      document.getElementById("try-on-link")?.href || "/?view=try-on",
+    );
   });
-  updateSelection();
+  if (catalogViewActive) {
+    searchInput.addEventListener("input", () => {
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => loadPage(0), 250);
+    });
+  }
 });
 
 (() => {
@@ -1345,11 +1332,9 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const accountLinks = Array.from(document.querySelectorAll("[data-open-account]"));
   const stepInput = wizard.querySelector('input[name="wizard_step"]');
   const wizardForm = wizard.querySelector("[data-style-wizard-form]");
-  const tryOnLink = document.querySelector("[data-open-try-on]");
+  const tryOnLink = document.getElementById("try-on-link");
   const tryOnPagePanel = document.getElementById("try-on-panel");
   const tryOnPanel = document.querySelector("[data-virtual-try-on]");
-  const homePagePanel = document.getElementById("home-panel");
-  const catalogPagePanel = document.getElementById("catalog-panel");
   const tryOnProductSearch = tryOnPanel?.querySelector("[data-vton-product-search]");
   const tryOnProductSelect = tryOnPanel?.querySelector("[data-vton-product-select]");
   const tryOnPersonPreview = tryOnPanel?.querySelector("[data-vton-person-preview]");
@@ -1377,7 +1362,6 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   let tryOnSearchTimer;
   let tryOnProductsController;
   let tryOnRequestController;
-  let tryOnProductsLoaded = false;
 
   const setStatus = message => {
     status.textContent = message;
@@ -1403,6 +1387,38 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     }
   };
 
+  const renderTryOnProductOptions = (searchProducts, emptyMessage) => {
+    const products = [
+      ...readSelectedCatalogGarments(),
+      ...searchProducts,
+    ];
+    const productOptions = [];
+    const seenProductUrls = new Set();
+    products.forEach(product => {
+      if (!product.product_url || seenProductUrls.has(product.product_url)) return;
+      seenProductUrls.add(product.product_url);
+      const option = document.createElement("option");
+      option.value = product.product_url;
+      option.textContent = [
+        product.store,
+        product.brand,
+        product.title,
+        product.size ? `Talla ${product.size}` : "",
+      ].filter(Boolean).join(" · ");
+      if (product.image_url) option.dataset.imageUrl = product.image_url;
+      productOptions.push(option);
+    });
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = productOptions.length
+      ? "Selecciona una prenda"
+      : emptyMessage;
+    tryOnProductSelect.replaceChildren(placeholder, ...productOptions);
+    tryOnProductSelect.disabled = false;
+    tryOnProductSelect.dispatchEvent(new Event("change"));
+  };
+
   const loadTryOnProducts = async search => {
     tryOnProductsController?.abort();
     tryOnProductsController = new AbortController();
@@ -1422,63 +1438,44 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
         throw new Error(data.error || `El servidor respondió HTTP ${response.status}.`);
       }
 
-      const productOptions = (data.products || []).map(product => {
-        const productOption = document.createElement("option");
-        productOption.value = product.product_url;
-        productOption.textContent = [
-          product.store,
-          product.brand,
-          product.title,
-          `Talla ${product.size}`,
-        ].join(" · ");
-        productOption.dataset.imageUrl = product.image_url;
-        productOption.dataset.price = product.price_clp ?? "";
-        productOption.dataset.store = product.store || "Tienda";
-        return productOption;
-      });
-      const placeholder = document.createElement("option");
-      placeholder.value = "";
-      placeholder.textContent = productOptions.length
-        ? "Selecciona una prenda"
-        : "No encontramos prendas para esa búsqueda";
-      tryOnProductSelect.replaceChildren(placeholder, ...productOptions);
-      tryOnProductSelect.disabled = false;
-      tryOnProductsLoaded = true;
-      tryOnProductSelect.dispatchEvent(new Event("change"));
+      renderTryOnProductOptions(
+        data.products || [],
+        "No encontramos prendas para esa búsqueda",
+      );
     } catch (error) {
       if (error.name === "AbortError") return;
-      tryOnProductsLoaded = false;
-      const failedOption = document.createElement("option");
-      failedOption.value = "";
-      failedOption.textContent = "No se pudo cargar el catálogo";
-      tryOnProductSelect.replaceChildren(failedOption);
+      renderTryOnProductOptions([], "No se pudo cargar el catálogo");
       tryOnStatus.textContent = "No se pudo cargar el catálogo de prendas. Inténtalo nuevamente.";
       console.error("No se pudieron cargar prendas para la prueba virtual.", error);
     }
   };
 
-  tryOnLink?.addEventListener("click", event => {
+  tryOnLink?.addEventListener("click", async event => {
     event.preventDefault();
-    homePagePanel.hidden = true;
-    catalogPagePanel.hidden = true;
-    tryOnPagePanel.hidden = false;
-    document.getElementById("home-link")?.removeAttribute("aria-current");
-    document.getElementById("catalog-link")?.removeAttribute("aria-current");
-    tryOnLink.setAttribute("aria-current", "page");
-    syncTryOnPhoto();
-    if (!selectedPhoto) {
-      tryOnStatus.textContent = "Vuelve a Inicio y selecciona una foto para usarla en el Probador.";
-    }
-    if (!tryOnProductsLoaded) {
-      loadTryOnProducts(tryOnProductSearch.value.trim());
-    }
-    tryOnPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    await tryOnPhotoSavePromise;
+    window.location.assign(tryOnLink.href);
   });
+
+  if (tryOnPagePanel && !tryOnPagePanel.hidden) {
+    syncTryOnPhoto();
+  }
 
   tryOnProductSearch?.addEventListener("input", () => {
     window.clearTimeout(tryOnSearchTimer);
     tryOnSearchTimer = window.setTimeout(
-      () => loadTryOnProducts(tryOnProductSearch.value.trim()),
+      () => {
+        const search = tryOnProductSearch.value.trim();
+        if (search) {
+          loadTryOnProducts(search);
+          return;
+        }
+
+        tryOnProductsController?.abort();
+        renderTryOnProductOptions(
+          [],
+          "Selecciona desde Catálogo o busca una prenda",
+        );
+      },
       250,
     );
   });
@@ -1495,161 +1492,12 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     tryOnResult.hidden = true;
   });
 
-  const tryOnCartProducts = tryOnPanel?.querySelector("[data-vton-cart-products]");
-  const tryOnCartCount = tryOnPanel?.querySelector("[data-vton-cart-count]");
-  const tryOnCartOpenButton = tryOnPanel?.querySelector("[data-vton-open-cart]");
-  const tryOnCartPanel = tryOnPanel?.querySelector("[data-vton-cart]");
-  const tryOnCartItems = tryOnPanel?.querySelector("[data-vton-cart-items]");
-  const tryOnCartTotal = tryOnPanel?.querySelector("[data-vton-cart-total]");
-  const tryOnCartConfirmButton = tryOnPanel?.querySelector("[data-vton-confirm]");
-  const tryOnConfirmationPanel = tryOnPanel?.querySelector("[data-vton-confirmation]");
-  const tryOnConfirmationItems = tryOnPanel?.querySelector("[data-vton-confirmation-items]");
-  const tryOnConfirmationTotal = tryOnPanel?.querySelector("[data-vton-confirmation-total]");
-  const tryOnConfirmationStatus = tryOnPanel?.querySelector("[data-vton-confirmation-status]");
-  const tryOnCartStorageKey = "matices-vton-cart";
-  const selectedTryOnCartProducts = new Map();
-  const tryOnCurrency = new Intl.NumberFormat("es-CL", {
-    style: "currency",
-    currency: "CLP",
-    maximumFractionDigits: 0,
-  });
-
-  const saveTryOnCart = () => {
-    try {
-      localStorage.setItem(
-        tryOnCartStorageKey,
-        JSON.stringify(Array.from(selectedTryOnCartProducts.values())),
-      );
-    } catch (error) {
-      console.error("No se pudo guardar el carrito del Probador.", error);
-      if (tryOnStatus) tryOnStatus.textContent = "No se pudo guardar el carrito en este navegador.";
-    }
-  };
-
-  try {
-    const savedCart = JSON.parse(localStorage.getItem(tryOnCartStorageKey) || "[]");
-    if (Array.isArray(savedCart)) {
-      savedCart.filter(product => product && typeof product.id === "string")
-        .forEach(product => selectedTryOnCartProducts.set(product.id, product));
-    }
-  } catch (error) {
-    console.error("No se pudo recuperar el carrito del Probador.", error);
+  if (tryOnPagePanel && !tryOnPagePanel.hidden) {
+    renderTryOnProductOptions(
+      [],
+      "Selecciona desde Catálogo o busca una prenda",
+    );
   }
-
-  const getTryOnCartProducts = () => Array.from(selectedTryOnCartProducts.values());
-
-  const renderTryOnCartProducts = () => {
-    if (!tryOnCartProducts || !tryOnProductSelect) return;
-    const availableProducts = Array.from(tryOnProductSelect.options)
-      .filter(option => option.value)
-      .map(option => ({
-        id: option.value,
-        label: option.textContent.trim(),
-        imageUrl: option.dataset.imageUrl || "",
-        price: Number(option.dataset.price) || null,
-        url: option.value,
-        store: option.dataset.store || "Tienda",
-      }));
-    tryOnCartProducts.replaceChildren(...availableProducts.map(product => {
-      const label = document.createElement("label");
-      label.className = "try-on-cart-product";
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.value = product.id;
-      checkbox.checked = selectedTryOnCartProducts.has(product.id);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selectedTryOnCartProducts.set(product.id, product);
-        else selectedTryOnCartProducts.delete(product.id);
-        saveTryOnCart();
-        updateTryOnCartCount();
-      });
-      const description = document.createElement("span");
-      description.textContent = `${product.label} · ${product.price
-        ? tryOnCurrency.format(product.price)
-        : "precio no disponible"}`;
-      label.append(checkbox, description);
-      return label;
-    }));
-    updateTryOnCartCount();
-  };
-
-  const updateTryOnCartCount = () => {
-    if (!tryOnCartCount || !tryOnCartOpenButton) return;
-    const count = selectedTryOnCartProducts.size;
-    tryOnCartCount.textContent = `${count} ${count === 1 ? "prenda" : "prendas"} en el carrito`;
-    tryOnCartOpenButton.disabled = count === 0;
-  };
-
-  const fillTryOnCartSummary = (list, totalElement) => {
-    const products = getTryOnCartProducts();
-    if (!list || !totalElement) return;
-    list.replaceChildren(...products.map(product => {
-      const item = document.createElement("li");
-      const link = document.createElement("a");
-      link.href = product.url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.textContent = `${product.label} · ${product.store}`;
-      item.append(link);
-      return item;
-    }));
-    const total = products.reduce((sum, product) => sum + (product.price || 0), 0);
-    const hasMissingPrice = products.some(product => !product.price);
-    totalElement.textContent = hasMissingPrice
-      ? `Total parcial referencial: ${tryOnCurrency.format(total)}. Hay productos sin precio disponible.`
-      : `Total referencial: ${tryOnCurrency.format(total)}.`;
-  };
-
-  const showTryOnCartStage = stage => {
-    if (!tryOnPanel || !tryOnCartPanel || !tryOnConfirmationPanel) return;
-    const isSelection = stage === "selection";
-    [
-      tryOnPanel.querySelector(".try-on-person"),
-      tryOnProductSearch?.closest("label"),
-      tryOnProductSelect?.closest("label"),
-      tryOnPanel.querySelector(".try-on-garment-preview"),
-      tryOnGenerateButton,
-      tryOnStatus,
-      tryOnPanel.querySelector(".try-on-auth-note"),
-      tryOnResult,
-    ].filter(Boolean).forEach(element => { element.hidden = !isSelection; });
-    tryOnCartSelectionPanel.hidden = !isSelection;
-    tryOnCartPanel.hidden = stage !== "cart";
-    tryOnConfirmationPanel.hidden = stage !== "confirmation";
-    if (stage === "cart") {
-      fillTryOnCartSummary(tryOnCartItems, tryOnCartTotal);
-      if (tryOnCartConfirmButton) {
-        tryOnCartConfirmButton.disabled = selectedTryOnCartProducts.size === 0;
-      }
-    } else if (stage === "confirmation") {
-      fillTryOnCartSummary(tryOnConfirmationItems, tryOnConfirmationTotal);
-    }
-  };
-
-  const tryOnCartSelectionPanel = tryOnPanel?.querySelector("[data-vton-cart-selection]");
-  tryOnCartOpenButton?.addEventListener("click", () => showTryOnCartStage("cart"));
-  tryOnPanel?.querySelector("[data-vton-back-selection]")?.addEventListener(
-    "click",
-    () => showTryOnCartStage("selection"),
-  );
-  tryOnCartConfirmButton?.addEventListener("click", () => {
-    showTryOnCartStage("confirmation");
-  });
-  tryOnPanel?.querySelector("[data-vton-back-cart]")?.addEventListener(
-    "click",
-    () => showTryOnCartStage("cart"),
-  );
-  tryOnPanel?.querySelector("[data-vton-finish]")?.addEventListener("click", () => {
-    if (tryOnConfirmationStatus) {
-      tryOnConfirmationStatus.textContent = (
-        "Selección confirmada. Abre los enlaces de cada prenda para completar "
-        + "la compra directamente en la tienda."
-      );
-    }
-    showTryOnCartStage("confirmation");
-  });
-  tryOnProductSelect?.addEventListener("change", renderTryOnCartProducts);
-  updateTryOnCartCount();
 
   const fileAsBase64 = file => new Promise((resolve, reject) => {
     const reader = new FileReader();

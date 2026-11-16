@@ -8,14 +8,14 @@
   <meta name="supabase-publishable-key" content="{supabase_publishable_key}">
   <title>Calce Wardrobe</title>
   <link rel="icon" type="image/png" href="/assets/calce-isotipo.png">
-  <link rel="stylesheet" href="/styles.css?v=profile-avatar-default-1">
+  <link rel="stylesheet" href="/styles.css?v=catalog-filter-layout-2">
 </head>
 <body>
   <header><div class="wrap nav">
-    <a class="brandmark" href="{storefront_url}" aria-label="Calce, probador online">
+    <a class="brandmark" href="{storefront_url}" aria-label="Calce, inicio">
       <img src="/assets/calce-isotipo.png" alt="">
       <span class="brandmark-copy">
-        <span class="brandmark-name">calce</span>
+        <span class="brandmark-name">Calce</span>
         <span class="brandmark-tagline">PROBADOR ONLINE</span>
       </span>
     </a>
@@ -23,8 +23,7 @@
       <a id="storefront-link" href="{storefront_url}"{storefront_link_current}>Home</a>
       <a id="home-link" href="{home_tab_url}"{home_link_current}>Tu Calce</a>
       <a id="catalog-link" href="{catalog_tab_url}"{catalog_link_current}>Catálogo</a>
-      <button id="try-on-link" class="nav-try-on-button" type="button"
-        data-open-try-on aria-controls="try-on-panel"{try_on_link_current}>Probador</button>
+      <a id="try-on-link" href="{try_on_tab_url}"{try_on_link_current}>Probador</a>
       <a id="info-link" href="{info_tab_url}"{info_link_current}>Info</a>
     </nav>
     <div class="nav-actions">
@@ -35,7 +34,7 @@
       <details class="profile-menu" data-profile-menu hidden>
         <summary aria-label="Abrir menú de perfil">
           <img class="profile-menu-avatar profile-menu-avatar-image"
-            data-profile-avatar-fallback src="/assets/profile-avatar-default.jpeg"
+            src="/assets/profile-avatar-default.jpeg?v=2"
             alt="" aria-hidden="true">
           <img class="profile-menu-avatar profile-menu-avatar-image" data-profile-avatar
             alt="" hidden>
@@ -43,6 +42,7 @@
           <span class="profile-menu-chevron" aria-hidden="true">⌄</span>
         </summary>
         <div class="profile-menu-content">
+          <p data-profile-greeting hidden></p>
           <p data-profile-email hidden></p>
           <a href="/?view=profile#profile-account-data" data-profile-account hidden>Datos de Cuenta</a>
           <a href="/?view=profile#profile-payment" data-profile-payment hidden>Forma de Pago</a>
@@ -264,7 +264,7 @@
           </header>
           <div class="profile-avatar-editor">
             <img class="profile-avatar-fallback" data-profile-avatar-fallback
-              src="/assets/profile-avatar-default.jpeg" alt="" aria-hidden="true">
+              src="/assets/profile-avatar-default.jpeg?v=2" alt="" aria-hidden="true">
             <img data-profile-avatar-preview alt="Foto de perfil" hidden>
             <label class="matices-button profile-avatar-button" for="profile-avatar-input">
               Cambiar foto de perfil
@@ -316,6 +316,6 @@
       </div>
     </section>
   </div></main>
-  <script src="/app.js?v=profile-avatar-default-1" defer></script>
+  <script src="/app.js?v=catalog-filter-layout-2" defer></script>
 </body>
 </html>
