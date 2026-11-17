@@ -308,3 +308,11 @@ catálogo actual no incluye marcas de molde asiático.
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+## Run App
+1. Abrir Terminal
+2. Ejecutar: 
+   cd "/Users/raimundolarrain/Desktop/Práctica/Proyectos/Proyecto Principal/Calce y Matices Integrado/web/"
+3. Ejecutar:
+   node app.js  
+4. Ejecutar:
+   npm start

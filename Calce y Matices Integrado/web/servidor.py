@@ -470,21 +470,6 @@ def _catalog_product_card(
         if image_url
         else '<span class="catalog-image-placeholder">Imagen no disponible</span>'
     )
-    measures = (
-        "".join(
-            f'<li data-comparison-measure="{escape(measure.nombre, quote=True)}" '
-            f'data-measure-garment="{escape(_format_measure(measure.prenda), quote=True)}" '
-            f'data-measure-body="{escape(_format_measure(measure.cuerpo), quote=True)}" '
-            f'data-measure-ease="{escape(_format_difference(measure.holgura), quote=True)}">'
-            f'<strong>{escape(measure.nombre)}:</strong> '
-            f'medida referencial {_format_measure(measure.prenda)}, '
-            f'tu cuerpo {_format_measure(measure.cuerpo)}, '
-            f'holgura estimada {_format_difference(measure.holgura)}</li>'
-            for measure in result.medidas
-        )
-        if result
-        else ""
-    )
     fit_score = (
         f"{result.puntuacion:.6f}"
         if result and isfinite(result.puntuacion)
@@ -523,7 +508,7 @@ def _catalog_product_card(
       data-catalog-searchable="{escape((store + ' ' + product.titulo + ' ' + product.marca + ' ' + product.categorias_catalogo).casefold(), quote=True)}">
       <label class="catalog-select">
         <input type="checkbox" data-catalog-select
-          aria-label="Seleccionar {escape(product.titulo, quote=True)} para comparar">
+          aria-label="Seleccionar {escape(product.titulo, quote=True)} para el Probador">
         <span>Seleccionar</span>
       </label>
       <span class="catalog-fit-badge {escape(fit_badge_class, quote=True)}"
@@ -538,9 +523,6 @@ def _catalog_product_card(
         <span class="catalog-fit">{escape(fit_label)}</span>
         <a class="catalog-buy-link" href="{escape(product.url, quote=True)}"
           target="_blank" rel="noopener noreferrer">Ver ficha en {escape(store)}</a>
-      </div>
-      <div class="catalog-item-measures" hidden>
-        <ul>{measures}</ul>
       </div>
     </article>"""
 
@@ -557,6 +539,14 @@ def _garment_catalog(
         _option(product_type, product_type, query.get("type", ""))
         for product_type in catalog_data["types"]
     )
+    size_options = _option("", "Todas las tallas", query.get("size", "")) + "".join(
+        _option(size, size, query.get("size", ""))
+        for size in catalog_data["sizes"]
+    )
+    brand_options = _option("", "Todas las marcas", query.get("brand", "")) + "".join(
+        _option(brand, brand, query.get("brand", ""))
+        for brand in catalog_data["brands"]
+    )
     sort_options = "".join(
         _option(value, label, query.get("sort", "fit-asc"))
         for value, label in CATALOG_SORT_OPTIONS
@@ -572,11 +562,25 @@ def _garment_catalog(
         '<aside class="catalog-sidebar"><div class="catalog-filter-card">'
         '<h3>Filtros</h3>'
         '<div class="catalog-filters">'
-        '<label>Buscar prendas<input type="search" data-catalog-search '
+        '<form class="catalog-search-form" data-catalog-search-form action="/" method="get">'
+        '<input type="hidden" name="view" value="catalog">'
+        '<label class="visually-hidden" for="catalog-search">Buscar prendas</label>'
+        '<input id="catalog-search" type="search" name="search" data-catalog-search '
         f'value="{escape(query.get("search", ""), quote=True)}" '
-        'placeholder="Nombre, marca o categoría"></label>'
+        'placeholder="Buscar prendas" autocomplete="off">'
+        '<button type="submit">Buscar</button></form>'
         '<label>Tipo de prenda<select data-catalog-type-filter>'
-        f'{type_options}</select></label></div>'
+        f'{type_options}</select></label>'
+        '<label>Talla<select data-catalog-size-filter>'
+        f'{size_options}</select></label>'
+        '<label>Marca<select data-catalog-brand-filter>'
+        f'{brand_options}</select></label>'
+        '<fieldset class="catalog-price-range"><legend>Rango de precios (CLP)</legend>'
+        '<label>Desde<input type="number" min="0" step="1000" '
+        f'data-catalog-min-price value="{escape(query.get("min_price", ""), quote=True)}"></label>'
+        '<label>Hasta<input type="number" min="0" step="1000" '
+        f'data-catalog-max-price value="{escape(query.get("max_price", ""), quote=True)}"></label>'
+        '</fieldset></div>'
         '</div></aside>'
         '<div class="catalog-main">'
         '<div class="catalog-heading"><div>'
@@ -599,17 +603,9 @@ def _garment_catalog(
         f'aria-live="polite">{escape(catalog_data["result_text"])}</p>'
         '<div class="catalog-selection-bar">'
         '<span data-catalog-selection-status aria-live="polite">Ninguna prenda seleccionada</span>'
-        '<button class="catalog-compare-button" type="button" '
-        'data-catalog-compare disabled>Selecciona Productos a Comparar</button></div>'
-        '<section class="catalog-comparison" data-catalog-comparison '
-        'aria-label="Detalle de prendas seleccionadas" hidden>'
-        '<h3>Detalle de prendas seleccionadas</h3>'
-        '<p class="sub">Las holguras se estiman con referencias de la matriz, '
-        'no con medidas verificadas en la ficha. Abre cada publicación para '
-        'confirmar disponibilidad y completar la compra.</p>'
-        '<div data-catalog-comparison-items></div>'
-        '<p class="catalog-total" data-catalog-total></p>'
-        '</section></div></div></section>'
+        '<button class="catalog-try-on-button" type="button" data-catalog-try-on '
+        'disabled>Selecciona prendas para probarte</button></div>'
+        '</div></div></section>'
     )
 
 
@@ -620,8 +616,6 @@ def _virtual_try_on_panel() -> str:
         '<header class="try-on-heading">'
         '<div><span class="eyebrow">Prueba con tu foto</span>'
         '<h1 id="virtual-try-on-title">Probador</h1></div>'
-        '<p class="sub">Usaremos la foto seleccionada en Inicio y una prenda del catálogo. '
-        'La foto se conserva temporalmente en este navegador durante una hora.</p>'
         '</header>'
         '<div class="try-on-layout">'
         '<div class="try-on-person">'
@@ -634,46 +628,18 @@ def _virtual_try_on_panel() -> str:
         '<label for="vton-product-search">Buscar una prenda del catálogo'
         '<input id="vton-product-search" type="search" data-vton-product-search '
         'placeholder="Nombre, marca o tienda" autocomplete="off"></label>'
-        '<label for="vton-product-select">Prenda'
+        '<label for="vton-product-select">Prendas'
         '<select id="vton-product-select" data-vton-product-select size="7">'
-        '<option value="">Escribe para buscar productos</option>'
+        '<option value="">Selecciona desde Catálogo o busca una prenda</option>'
         '</select></label>'
+        '<button class="matices-button matices-button-primary" type="button" '
+        'data-vton-generate disabled>Probar</button>'
         '<div class="try-on-garment-preview">'
         '<img data-vton-garment-preview alt="Imagen de la prenda seleccionada" hidden>'
         '<p data-vton-garment-empty>Selecciona una prenda para ver su imagen.</p>'
         '</div>'
-        '<section class="try-on-cart-selection" data-vton-cart-selection '
-        'aria-labelledby="vton-cart-selection-title">'
-        '<h2 id="vton-cart-selection-title">Carrito</h2>'
-        '<p>Marca las prendas que quieres revisar antes de confirmar la compra.</p>'
-        '<div data-vton-cart-products></div>'
-        '<p data-vton-cart-count aria-live="polite">0 prendas en el carrito</p>'
-        '<button type="button" class="matices-button" data-vton-open-cart disabled>'
-        'Ir al carrito</button>'
-        '</section>'
-        '<section class="try-on-cart" data-vton-cart aria-label="Carrito de prendas" hidden>'
-        '<h2>Tu carrito</h2><ul data-vton-cart-items></ul>'
-        '<p data-vton-cart-total></p>'
-        '<button type="button" class="matices-button" data-vton-back-selection>Volver</button>'
-        '<button type="button" class="matices-button matices-button-primary" '
-        'data-vton-confirm disabled>Pasar a confirmar compra</button>'
-        '</section>'
-        '<section class="try-on-confirmation" data-vton-confirmation '
-        'aria-label="Confirma tu selección" hidden>'
-        '<h2>Confirma tu selección</h2><ul data-vton-confirmation-items></ul>'
-        '<p data-vton-confirmation-total></p>'
-        '<p data-vton-confirmation-status role="status" aria-live="polite"></p>'
-        '<p>La compra se finaliza en la tienda de cada prenda. Calce no procesa pagos ni pedidos.</p>'
-        '<button type="button" class="matices-button" data-vton-back-cart>Volver al carrito</button>'
-        '<button type="button" class="matices-button matices-button-primary" '
-        'data-vton-finish>Confirmar selección</button></section>'
-        '<button class="matices-button matices-button-primary" type="button" '
-        'data-vton-generate disabled>Probar prenda</button>'
         '</div></div>'
-        '<p class="try-on-status" data-vton-status role="status" aria-live="polite">'
-        'Selecciona una prenda. Se requiere iniciar sesión para generar la prueba.</p>'
-        '<p class="try-on-auth-note">¿No tienes sesión? '
-        '<a href="/?view=account&amp;wizard_step=2">Inicia sesión o crea una cuenta.</a></p>'
+        '<p class="try-on-status" data-vton-status role="status" aria-live="polite"></p>'
         '<figure class="try-on-result" data-vton-result hidden>'
         '<figcaption data-vton-result-status></figcaption>'
         '<img data-vton-result-image alt="Resultado de la prueba virtual">'
@@ -699,14 +665,48 @@ def _catalog_page_data(
     types = tuple(
         sorted({product.tipo_prenda for product in CATALOG_PRODUCTS}, key=str.casefold)
     )
+    sizes = tuple(
+        sorted(
+            {product.talla or "No indicada" for product in CATALOG_PRODUCTS},
+            key=str.casefold,
+        )
+    )
+    brands = tuple(
+        sorted(
+            {product.marca or "No indicada" for product in CATALOG_PRODUCTS},
+            key=str.casefold,
+        )
+    )
     normalized_search = _normalize_search_text(query.get("search", ""))
     selected_type = query.get("type", "")
+    selected_size = query.get("size", "")
+    selected_brand = query.get("brand", "")
+    try:
+        min_price = max(0, int(query["min_price"])) if query.get("min_price") else None
+    except ValueError:
+        min_price = None
+    try:
+        max_price = max(0, int(query["max_price"])) if query.get("max_price") else None
+    except ValueError:
+        max_price = None
     filtered = []
     for index, (product, reference, reference_label, result) in enumerate(
         recommendations
     ):
         searchable = CATALOG_SEARCH_TEXT_BY_URL[product.url]
         if selected_type and selected_type != product.tipo_prenda:
+            continue
+        if selected_size and selected_size != (product.talla or "No indicada"):
+            continue
+        if selected_brand and selected_brand != (product.marca or "No indicada"):
+            continue
+        if min_price is not None and (
+            product.precio_clp is None or product.precio_clp < min_price
+        ):
+            continue
+        if max_price is not None and (
+            product.precio_clp is None or product.precio_clp > max_price
+        ):
             continue
         if normalized_search and normalized_search not in searchable:
             continue
@@ -764,6 +764,8 @@ def _catalog_page_data(
     return {
         "cards": cards,
         "types": types,
+        "sizes": sizes,
+        "brands": brands,
         "total": total,
         "page": page,
         "pages": page_count,
@@ -790,7 +792,6 @@ def _virtual_try_on_products(search: str) -> Dict[str, object]:
                 "store": CATALOG_STORES_BY_URL.get(product.url, "Vestua"),
                 "size": product.talla or "No indicada",
                 "image_url": image_url,
-                "price_clp": product.precio_clp,
                 "category": _virtual_try_on_category(product),
             }
         )
@@ -1343,7 +1344,7 @@ def _storefront_content() -> str:
     return f"""<div class="storefront-page">
       <section class="storefront-hero" aria-labelledby="storefront-title">
         <div class="storefront-hero-copy">
-          <span class="eyebrow">Calce · probador online</span>
+          <span class="eyebrow">Calce · estilo personal</span>
           <h1 id="storefront-title">Tu estilo, tu calce, tu manera de elegir.</h1>
           <p>Explora prendas, descubre nuevos favoritos y encuentra referencias que te ayuden a elegir con más confianza.</p>
           <div class="storefront-hero-actions">

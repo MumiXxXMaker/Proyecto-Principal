@@ -291,7 +291,6 @@ class ExcelCatalogTests(unittest.TestCase):
         page = renderizar_pagina(
             {
                 "view": "catalog",
-                "brand": "Zara",
                 "waist": "70",
                 "hip": "96",
             }
@@ -311,7 +310,13 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('value="price-desc">Precio: mayor a menor</option>', catalog)
         self.assertIn('value="fit-asc" selected>Mejor calce</option>', catalog)
         self.assertIn('value="fit-desc">Peor calce</option>', catalog)
-        self.assertIn('data-catalog-select', catalog)
+        self.assertIn('<input type="checkbox" data-catalog-select', catalog)
+        self.assertIn("data-catalog-search-form", catalog)
+        self.assertIn("data-catalog-brand-filter", catalog)
+        self.assertIn("data-catalog-min-price", catalog)
+        self.assertIn("data-catalog-max-price", catalog)
+        self.assertIn("data-catalog-try-on", catalog)
+        self.assertIn("disabled>Selecciona prendas para probarte</button>", catalog)
         self.assertNotIn("Probar virtualmente", catalog)
         self.assertNotIn("consulta del 2026-10-29", catalog)
         self.assertNotIn(
@@ -319,6 +324,7 @@ class ExcelCatalogTests(unittest.TestCase):
             catalog,
         )
         self.assertIn("data-catalog-type-filter", catalog)
+        self.assertIn("data-catalog-size-filter", catalog)
         self.assertIn('class="catalog-sidebar"', catalog)
         self.assertIn('data-catalog-page-size="20"', catalog)
         self.assertIn('data-catalog-previous disabled', catalog)
@@ -350,11 +356,9 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("referencia de matriz para", catalog)
         self.assertNotIn("Explora tiendas de ropa de mujer en Chile", catalog)
         self.assertNotIn('class="catalog-shops"', catalog)
-        self.assertIn(
-            'data-catalog-compare disabled>Selecciona Productos a Comparar</button>',
-            catalog,
-        )
-        self.assertIn('data-catalog-comparison-items', catalog)
+        self.assertNotIn("data-catalog-compare", catalog)
+        self.assertNotIn("data-catalog-comparison", catalog)
+        self.assertIn("catalog-selection-bar", catalog)
 
     def test_catalog_search_and_pagination_cover_the_full_snapshot(self):
         first_page = _catalog_page_data({"sort": "fit-asc"})
@@ -376,6 +380,56 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertTrue(first_ids.isdisjoint(second_ids))
         self.assertGreaterEqual(search_result["total"], 1)
         self.assertIn(target["url"], search_result["cards"])
+
+    def test_catalog_size_filter_limits_products_and_preserves_selection(self):
+        size = next(product.talla for product in CATALOG_PRODUCTS if product.talla)
+        filtered = _catalog_page_data({"size": size})
+        catalog_page = renderizar_pagina({"view": "catalog", "size": size})
+        card_sizes = re.findall(r'data-catalog-size="([^"]+)"', filtered["cards"])
+        expected_total = sum(product.talla == size for product in CATALOG_PRODUCTS)
+
+        self.assertEqual(filtered["total"], expected_total)
+        self.assertTrue(card_sizes)
+        self.assertTrue(all(card_size == size for card_size in card_sizes))
+        self.assertIn(
+            f'<option value="{escape(size, quote=True)}" selected>{escape(size)}</option>',
+            catalog_page,
+        )
+
+    def test_catalog_brand_and_price_filters_combine(self):
+        target = next(
+            product for product in CATALOG_PRODUCTS
+            if product.marca and product.precio_clp is not None
+        )
+        price = str(target.precio_clp)
+        filtered = _catalog_page_data(
+            {"brand": target.marca, "min_price": price, "max_price": price}
+        )
+        catalog_page = renderizar_pagina(
+            {
+                "view": "catalog",
+                "brand": target.marca,
+                "min_price": price,
+                "max_price": price,
+            }
+        )
+
+        self.assertIn(target.url, filtered["cards"])
+        self.assertTrue(
+            all(
+                item.marca == target.marca and item.precio_clp == target.precio_clp
+                for item in CATALOG_PRODUCTS
+                if item.url in re.findall(
+                    r'href="([^"]+)"', filtered["cards"]
+                )
+            )
+        )
+        self.assertIn(
+            f'<option value="{escape(target.marca, quote=True)}" selected>',
+            catalog_page,
+        )
+        self.assertIn(f'data-catalog-min-price value="{price}"', catalog_page)
+        self.assertIn(f'data-catalog-max-price value="{price}"', catalog_page)
 
     def test_catalog_reuses_fit_recommendations_for_the_same_profile(self):
         query = {
@@ -447,7 +501,6 @@ class ExcelCatalogTests(unittest.TestCase):
             cards["cards"],
         )
         self.assertIn('data-catalog-bust="90.0 cm"', cards["cards"])
-        self.assertIn('data-measure-body="74.0 cm"', cards["cards"])
 
     def test_photo_step_offers_device_camera_and_image_picker(self):
         page = renderizar_pagina({})
@@ -633,6 +686,17 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('data-open-account="sign-up"', account_links)
         self.assertIn('class="profile-menu" data-profile-menu hidden>', page)
         profile_menu = page.split('data-profile-menu hidden>', 1)[1].split('</details>', 1)[0]
+        profile_menu_summary = profile_menu.split("</summary>", 1)[0]
+        self.assertIn(
+            'src="/assets/profile-avatar-default.jpeg?v=2"',
+            profile_menu_summary,
+        )
+        self.assertNotIn("data-profile-avatar-fallback", profile_menu_summary)
+        self.assertIn('<p data-profile-greeting hidden></p>', profile_menu)
+        self.assertLess(
+            profile_menu.index("data-profile-greeting"),
+            profile_menu.index("data-profile-email"),
+        )
         self.assertNotIn('data-profile-auth=', profile_menu)
         self.assertNotIn('>Iniciar sesión</a>', profile_menu)
         self.assertNotIn('>Crear cuenta</a>', profile_menu)
@@ -728,7 +792,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('window.addEventListener("matices:restore-photo"', app_script)
         self.assertNotIn("service_role", schema)
 
-    def test_profile_and_try_on_cart_panels_include_account_and_confirmation_flow(self):
+    def test_profile_and_try_on_panels_include_account_and_product_flow(self):
         profile_page = renderizar_pagina({"view": "profile"})
         try_on_page = renderizar_pagina({"view": "try-on"})
         schema = (ROOT / "supabase" / "schema.sql").read_text(encoding="utf-8")
@@ -736,18 +800,13 @@ class ExcelCatalogTests(unittest.TestCase):
 
         self.assertIn('id="profile-panel" data-page-panel="profile"', profile_page)
         self.assertIn('id="profile-panel" data-page-panel="profile" hidden', try_on_page)
-        self.assertIn("data-vton-cart-selection", try_on_page)
-        self.assertIn("data-vton-cart-products", try_on_page)
-        self.assertIn("data-vton-open-cart", try_on_page)
-        self.assertIn("data-vton-confirm", try_on_page)
-        self.assertIn("data-vton-confirmation", try_on_page)
-        self.assertIn("data-vton-back-selection", try_on_page)
-        self.assertIn("data-vton-back-cart", try_on_page)
+        self.assertIn("data-vton-product-select", try_on_page)
+        self.assertIn("data-vton-generate", try_on_page)
+        self.assertNotIn("data-vton-cart", try_on_page)
+        self.assertNotIn("data-vton-confirmation", try_on_page)
         products = _virtual_try_on_products("")["products"]
         self.assertTrue(products)
-        self.assertIn("price_clp", products[0])
-        self.assertIn("Pasar a confirmar compra", try_on_page)
-        self.assertIn("no procesa pagos ni pedidos", try_on_page)
+        self.assertIn("image_url", products[0])
         self.assertIn("profileFirstNameInput", app_script)
         self.assertIn("return_view", app_script)
         self.assertIn("first_name text", schema)
@@ -800,16 +859,16 @@ class ExcelCatalogTests(unittest.TestCase):
             partial_measurements["cards"],
         )
 
-    def test_selected_catalog_cards_expose_published_size_and_body_measurements(self):
+    def test_catalog_cards_keep_fit_details_without_comparison_data(self):
         product = next(item for item in WOMENSWEAR_DATA["products"] if item["store"] == "Paris")
         search_result = _catalog_page_data({"search": product["title"]})
 
         self.assertIn('data-catalog-size="No indicada"', search_result["cards"])
         self.assertIn('data-catalog-bust="Ingresa medida"', search_result["cards"])
-        self.assertIn('data-comparison-measure="Cintura"', search_result["cards"])
-        self.assertIn('data-measure-garment=', search_result["cards"])
-        self.assertIn('data-measure-body=', search_result["cards"])
-        self.assertIn('data-measure-ease=', search_result["cards"])
+        self.assertNotIn('data-comparison-measure="Cintura"', search_result["cards"])
+        self.assertNotIn('data-measure-garment=', search_result["cards"])
+        self.assertNotIn('data-measure-body=', search_result["cards"])
+        self.assertNotIn('data-measure-ease=', search_result["cards"])
         self.assertNotIn(
             "Ingresa tus medidas para comparar tu cuerpo con las medidas de esta prenda.",
             search_result["cards"],
@@ -826,8 +885,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('action="/"', home_page)
         self.assertNotIn("Ver catálogo completo", home_page)
         self.assertIn('href="/?view=catalog&amp;preference=regular"', home_page)
-        self.assertIn("data-open-try-on", home_page)
-        self.assertIn(">Probador</button>", home_page)
+        self.assertIn('href="/?view=try-on">Probador</a>', home_page)
         self.assertIn("se guarda temporalmente en este navegador por hasta una hora", home_page)
         self.assertNotIn("aiuta", home_page.lower())
         self.assertIn('<nav class="page-tabs" aria-label="Secciones principales">', home_page)
@@ -840,6 +898,10 @@ class ExcelCatalogTests(unittest.TestCase):
             storefront_page,
         )
         self.assertIn('id="storefront-title"', storefront_page)
+        self.assertIn(
+            '<span class="eyebrow">Calce · estilo personal</span>',
+            storefront_page,
+        )
         self.assertIn("Productos destacados", storefront_page)
         self.assertIn('data-page-panel="storefront"', storefront_page)
         self.assertIn(
@@ -871,20 +933,47 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('data-page-panel="catalog" hidden', storefront_page)
         self.assertIn('data-page-panel="home" hidden', catalog_page)
         self.assertIn('data-page-panel="catalog"', catalog_page)
-        self.assertIn("data-open-try-on", catalog_page)
+        self.assertIn('href="/?view=try-on">Probador</a>', catalog_page)
         self.assertNotIn("aiuta", catalog_page.lower())
         self.assertIn('data-page-panel="try-on" hidden', home_page)
         self.assertIn(
-            'data-open-try-on aria-controls="try-on-panel" aria-current="page">',
+            'href="/?view=try-on" aria-current="page">Probador</a>',
             try_on_page,
         )
         self.assertIn('data-virtual-try-on', try_on_page)
+        self.assertNotIn(
+            "Usaremos la foto seleccionada en Inicio y una prenda del catálogo.",
+            try_on_page,
+        )
         self.assertIn("data-vton-product-search", try_on_page)
+        self.assertIn(
+            '<option value="">Selecciona desde Catálogo o busca una prenda</option>',
+            try_on_page,
+        )
+        self.assertIn(
+            'data-vton-status role="status" aria-live="polite"></p>',
+            try_on_page,
+        )
+        self.assertNotIn(
+            "Selecciona una prenda. Se requiere iniciar sesión para generar la prueba.",
+            try_on_page,
+        )
+        self.assertNotIn("¿No tienes sesión?", try_on_page)
+        self.assertIn(
+            'data-vton-generate disabled>Probar</button>',
+            try_on_page,
+        )
+        self.assertLess(
+            try_on_page.index("</select></label>"),
+            try_on_page.index("data-vton-generate disabled>Probar</button>"),
+        )
+        self.assertLess(
+            try_on_page.index("data-vton-generate disabled>Probar</button>"),
+            try_on_page.index('<div class="try-on-garment-preview">'),
+        )
         self.assertIn('data-page-panel="try-on"', try_on_page)
-        self.assertIn("data-vton-cart-selection", try_on_page)
-        self.assertIn("data-vton-cart", try_on_page)
-        self.assertIn("data-vton-confirmation", try_on_page)
-        self.assertIn("Calce no procesa pagos ni pedidos.", try_on_page)
+        self.assertNotIn("data-vton-cart", try_on_page)
+        self.assertNotIn("data-vton-confirmation", try_on_page)
         self.assertIn('data-page-panel="home" hidden', try_on_page)
         self.assertNotIn("aiuta", try_on_page.lower())
         self.assertIn('id="garment-catalog" data-garment-catalog', catalog_page)
