@@ -11,7 +11,11 @@ services:
     envVars:
       - key: SUPABASE_PUBLISHABLE_KEY
         sync: false
-      - key: VTON_API_URL
+      - key: RAPIDAPI_KEY
         sync: false
-      - key: VTON_API_TOKEN
+      - key: DATATOBIZ_RAPIDAPI_KEY
+        sync: false
+      - key: RAPIDAPI_DIFFUSION_KEY
+        sync: false
+      - key: RAPIDAPI_REFINER_KEY
         sync: false

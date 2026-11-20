@@ -25,6 +25,10 @@ conserva la guía para foto, medidas y recomendaciones de calce.
    prendas. Las tarjetas y la comparación muestran el calce estimado y las
    medidas referenciales disponibles.
 
+   El filtro **Tipo de prenda** agrupa las prendas superiores e inferiores y los
+   vestidos. Omite las opciones **Ropa interior**, **Ropa de playa** y **Ropa**;
+   esas prendas siguen apareciendo al elegir **Todos los tipos**.
+
 La paleta es una orientación visual; no filtra prendas por color, porque el
 catálogo no contiene datos de color verificados por producto. Las estimaciones
 de calce son orientativas y usan las referencias disponibles, no medidas físicas
@@ -46,94 +50,53 @@ de instalar las dependencias de Python. Para detener el servidor, presiona
 El acceso a la cámara requiere permiso del navegador y un contexto seguro:
 usa `localhost` en este equipo o sirve la aplicación mediante HTTPS.
 
-## API de probador virtual con Modal
+## API de probador virtual con RapidAPI
 
-El botón **Probador**, junto a **Catálogo**, usa la foto seleccionada en **Inicio**
-y permite buscar una prenda del catálogo. La aplicación envía las imágenes a
-Modal a través de su backend; solo las cuentas con sesión iniciada pueden
-generar una prueba.
+El botón **Probador** usa la foto seleccionada en **Inicio** y una prenda del
+catálogo. Solo las cuentas con sesión iniciada pueden generar una prueba. La
+El selector permite elegir **Automático**, **Try on Clothes Pro**, **DataToBiz**,
+**Try-On Diffusion** o **Try on Clothes Refiner**. Automático intenta primero
+Try on Clothes Pro y usa DataToBiz como respaldo. Try-On Diffusion funciona
+independientemente con una sola prenda y envía los archivos al endpoint
+`/try-on-file`. DataToBiz también funciona de forma independiente, pero admite
+solo una prenda superior individual. Al elegir cualquiera de esos proveedores
+directos, no se llama a los demás.
 
-El archivo [`vton_api.py`](./vton_api.py) sirve una API FastAPI ligera y delega
-la inferencia a FASHN VTON 1.5 en una GPU Modal L4. El modelo genera una imagen
-de la persona con la prenda seleccionada usando 20 pasos de inferencia. Los pesos
-de FASHN y DWPose, junto con la caché del parser, se guardan en el volumen
-persistente `vton-weights`; la caché SDXL-Turbo que ya existía no se elimina.
+Clothes Refiner es una etapa de mejora, no un generador independiente: primero
+solicita una imagen preliminar a Try on Clothes Pro y después la envía junto con
+la foto, el género elegido y las prendas a
+`/portrait/enhance/try-on-clothes-refiner`. Por eso consume solicitudes de ambas
+APIs y no funcionará si Try on Clothes Pro no tiene cuota o suscripción activa.
 
-**Licencia:** aunque FASHN VTON 1.5 publica sus pesos bajo Apache-2.0, el parser
-humano requerido usa la licencia NVIDIA de SegFormer, limitada a investigación
-y evaluación no comercial. Esta integración es solo para uso personal/no
-comercial; no la uses en un servicio comercial sin reemplazar el parser por uno
-con licencia adecuada.
+Configura `RAPIDAPI_KEY` y `DATATOBIZ_RAPIDAPI_KEY` en el `.env` local o como
+variables de entorno. Try-On Diffusion y Clothes Refiner usan
+`RAPIDAPI_DIFFUSION_KEY` y `RAPIDAPI_REFINER_KEY` respectivamente; si no se
+definen, usan `RAPIDAPI_KEY`. Cada API requiere una suscripción activa en
+RapidAPI. Copia `.env.example` como punto de partida y agrega las claves
+necesarias como secretos en Render. La clave que usa el servidor web se
+configura por separado de la conexión MCP de VS Code.
 
-Para ejecutarlo, instala el cliente Modal fuera de las dependencias de la app,
-con Python 3.10 o posterior. Configura tu cuenta y crea un token de acceso:
+En modo **Automático**, si Try on Clothes Pro falla, la app intenta DataToBiz
+una vez para una prenda superior individual e informa el error de cada API si
+ambas fallan. No se hacen reintentos automáticos adicionales. Try-On Diffusion
+admite una sola prenda por solicitud y no combina prendas.
 
-```bash
-python3.11 -m pip install --user --upgrade modal fastapi
-python3.11 -m modal setup
-python3.11 -m modal secret create vton-api-auth VTON_API_TOKEN=elige-un-token-largo
-```
+La API requiere imágenes y procesa la solicitud de forma asíncrona. Las prendas
+se separan en superiores, inferiores y vestidos. Una prenda superior se envía
+como `top_garment`; una inferior se envía como `bottom_garment`. Puedes elegir
+una de cada tipo para generar ambas en una sola imagen. Si eliges solo una
+prenda inferior, como el proveedor también exige `top_garment`, se usa un
+recorte central de la parte superior de la foto como referencia. El proveedor
+puede modificar esa zona, así que el resultado no garantiza que la parte
+superior quede idéntica. Para vestidos no se envía una prenda inferior. Las
+fotos y las imágenes de las prendas se normalizan a JPEG (máximo 2048 píxeles y
+5 MB) y se comparten directamente con RapidAPI; no se guardan en Supabase
+Storage para esta operación. No uses el Probador si no aceptas ese envío. La
+foto original se optimiza también en el navegador a un máximo de 1024 píxeles
+para reducir la transferencia y el tiempo de procesamiento.
 
-Descarga y prepara los pesos una vez antes de publicar la API:
-
-```bash
-python3.11 -m modal run vton_api.py::prepare_weights
-python3.11 -m modal deploy vton_api.py
-```
-
-La preparación descarga cerca de 2 GB del modelo VTON, los pesos de DWPose y
-unos 244 MB del parser al volumen `vton-weights`. Después del despliegue,
-configura en el `.env` de esta app `VTON_API_URL` (URL base permanente de Modal,
-sin `/try-on`) y `VTON_API_TOKEN` (el mismo valor configurado en el secreto de
-Modal). Configura esas mismas variables en Render si usas la app publicada. El
-token se envía solo desde el servidor y no debe incluirse en el navegador.
-
-El worker usa una GPU L4, se escala a cero tras 60 segundos sin solicitudes y
-acepta una inferencia concurrente a la vez. La tarifa publicada de la L4 es
-aprox. US$0.000222/s, más CPU, memoria y almacenamiento del volumen. La primera
-solicitud tras escalar a cero puede tardar varios minutos mientras inicia el
-worker y carga el modelo; las siguientes son más rápidas mientras esté activo.
-
-Para obtener una URL temporal que se actualiza al guardar cambios:
-
-```bash
-python3.11 -m modal serve vton_api.py
-```
-
-La URL permanente tendrá el formato
-`https://<usuario>--probador-virtual-api-fastapi-app.modal.run`; agrega
-`/try-on` al final para llamar al endpoint. La ruta exige el token guardado como
-secreto de Modal. No incluyas ese token en el JavaScript público del navegador:
-llama a esta API desde un backend propio.
-
-Ejemplo de cliente Python (requiere `requests`). Configura `VTON_API_TOKEN` en
-el entorno del backend y sustituye la URL por la que entregue Modal:
-
-```python
-import base64
-import os
-
-import requests
-
-def image_as_base64(path):
-    with open(path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode("utf-8")
-
-response = requests.post(
-    "https://<usuario>--probador-virtual-api-fastapi-app.modal.run/try-on",
-    headers={"Authorization": f"Bearer {os.environ['VTON_API_TOKEN']}"},
-    json={
-        "person_image_base64": image_as_base64("persona.jpg"),
-        "garment_image_base64": image_as_base64("prenda.jpg"),
-        "category": "upper_body",
-    },
-    timeout=600,
-)
-response.raise_for_status()
-result = response.json()
-with open("resultado.jpg", "wb") as image_file:
-    image_file.write(base64.b64decode(result["result_image_base64"]))
-```
+El archivo [`vton_api.py`](./vton_api.py) pertenece a la implementación anterior
+con Modal y ya no es utilizado por la aplicación web.
 
 ## Publicar gratis en Render
 
@@ -141,10 +104,9 @@ El archivo [`../render.yaml`](../render.yaml) configura un servicio web
 gratuito con un subdominio HTTPS de `onrender.com`. Sube este repositorio a
 GitHub y, en Render, selecciona **New → Blueprint** y conecta el repositorio.
 Render leerá la configuración y solicitará `SUPABASE_PUBLISHABLE_KEY`,
-`VTON_API_URL` y `VTON_API_TOKEN` como variables de entorno. Usa la URL base
-permanente de Modal, sin `/try-on`, y el mismo token del secreto de Modal
-`vton-api-auth`. No guardes el token en el repositorio; para Supabase usa la
-clave publishable/anon, nunca `service_role`.
+`RAPIDAPI_KEY` y las claves RapidAPI opcionales que quieras habilitar. No guardes
+claves RapidAPI en el repositorio; para Supabase usa la clave publishable/anon,
+nunca `service_role`.
 
 La página será pública, pero las medidas, paletas y fotos de las cuentas siguen
 protegidas por la autenticación y RLS de Supabase. Después del primer despliegue,

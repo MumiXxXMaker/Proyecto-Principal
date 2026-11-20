@@ -1,5 +1,6 @@
 import base64
 import binascii
+from concurrent.futures import ThreadPoolExecutor
 from html import escape
 from http.client import IncompleteRead
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -8,6 +9,7 @@ from pathlib import Path
 from dataclasses import replace
 from functools import lru_cache
 import gzip
+import io
 import json
 from math import isfinite
 import os
@@ -15,9 +17,11 @@ import re
 from statistics import median
 import subprocess
 import sys
+import time
+import uuid
 from typing import Dict, MutableMapping, Optional, Tuple
 import unicodedata
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 import webbrowser
@@ -77,10 +81,53 @@ SUPABASE_URL = os.environ.get(
     "SUPABASE_URL", "https://twhszjxhmimqlzthlbgy.supabase.co"
 ).rstrip("/")
 SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
-VTON_API_URL = os.environ.get("VTON_API_URL", "").strip().rstrip("/")
-VTON_API_TOKEN = os.environ.get("VTON_API_TOKEN", "")
-MAX_VTON_IMAGE_BYTES = 10 * 1024 * 1024
-MAX_VTON_REQUEST_BYTES = 14 * 1024 * 1024 + 64 * 1024
+RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "").strip()
+RAPIDAPI_DIFFUSION_KEY = (
+    os.environ.get("RAPIDAPI_DIFFUSION_KEY", "").strip() or RAPIDAPI_KEY
+)
+RAPIDAPI_REFINER_KEY = (
+    os.environ.get("RAPIDAPI_REFINER_KEY", "").strip() or RAPIDAPI_KEY
+)
+RAPIDAPI_HOST = "try-on-clothes-pro.p.rapidapi.com"
+RAPIDAPI_ENDPOINT = (
+    f"https://{RAPIDAPI_HOST}/portrait/editing/try-on-clothes-pro"
+)
+RAPIDAPI_TASK_RESULT_ENDPOINT = (
+    f"https://{RAPIDAPI_HOST}/api/rapidapi/query-async-task-result"
+)
+DATATOBIZ_RAPIDAPI_KEY = os.environ.get("DATATOBIZ_RAPIDAPI_KEY", "").strip()
+DATATOBIZ_RAPIDAPI_HOST = "virtual-try-on2.p.rapidapi.com"
+DATATOBIZ_RAPIDAPI_ENDPOINT = (
+    f"https://{DATATOBIZ_RAPIDAPI_HOST}/clothes-virtual-tryon"
+)
+DIFFUSION_RAPIDAPI_HOST = "try-on-diffusion.p.rapidapi.com"
+DIFFUSION_RAPIDAPI_ENDPOINT = (
+    f"https://{DIFFUSION_RAPIDAPI_HOST}/try-on-file"
+)
+REFINER_RAPIDAPI_HOST = "try-on-clothes-refiner.p.rapidapi.com"
+REFINER_RAPIDAPI_ENDPOINT = (
+    f"https://{REFINER_RAPIDAPI_HOST}/portrait/enhance/try-on-clothes-refiner"
+)
+REFINER_RAPIDAPI_TASK_RESULT_ENDPOINT = (
+    f"https://{REFINER_RAPIDAPI_HOST}/api/rapidapi/query-async-task-result"
+)
+MAX_VTON_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_VTON_REQUEST_BYTES = 8 * 1024 * 1024
+MAX_CATALOG_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_RAPIDAPI_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_RAPIDAPI_RESPONSE_BYTES = 1024 * 1024
+MAX_DATATOBIZ_RESPONSE_BYTES = 20 * 1024 * 1024
+RAPIDAPI_POLL_INTERVAL_SECONDS = 5
+RAPIDAPI_TASK_TIMEOUT_SECONDS = 540
+
+
+class TryOnProvidersError(Exception):
+    def __init__(self, primary_error: Exception, fallback_error: Exception):
+        self.primary_error = primary_error
+        self.fallback_error = fallback_error
+        super().__init__("Fallaron la API principal y la alternativa.")
+
+
 REPOSITORY = RepositorioExcelPrendas(MATRIX_PATH)
 VARIABLES = REPOSITORY.cargar_variables()
 STANDARD_SIZES = RepositorioTallasEstandar(SIZE_CHART_PATH).cargar()
@@ -157,6 +204,48 @@ def _normalize_search_text(value: str) -> str:
     )
 
 
+VTON_UPPER_BODY_TYPES = frozenset(
+    _normalize_search_text(value)
+    for value in (
+        "Accesorio",
+        "Bata",
+        "Blazer",
+        "Blusa",
+        "Body",
+        "Camisa",
+        "Camisola",
+        "Cardigan",
+        "Chaleco",
+        "Chaqueta",
+        "Corset",
+        "Enterito",
+        "Kimono",
+        "Parka",
+        "Peto",
+        "Pijama",
+        "Polera",
+        "Polerón",
+        "Sweater",
+        "Top",
+    )
+)
+VTON_LOWER_BODY_TYPES = frozenset(
+    _normalize_search_text(value)
+    for value in (
+        "Buzo",
+        "Calza",
+        "Falda",
+        "Jeans",
+        "Pantalón",
+        "Shorts",
+    )
+)
+EXCLUDED_CATALOG_FILTER_TYPES = frozenset(
+    _normalize_search_text(value)
+    for value in ("Ropa interior", "Ropa de playa", "Ropa")
+)
+
+
 CATALOG_PRODUCTS = tuple(
     product
     for product in (*VESTUA_PRODUCTS, *WOMENSWEAR_PRODUCTS)
@@ -194,19 +283,43 @@ CATALOG_SORT_OPTIONS = (
 )
 
 
-def _virtual_try_on_category(product: ProductoVestua) -> str:
-    details = _normalize_search_text(
-        " ".join((product.titulo, product.tipo_prenda, product.categorias_catalogo))
-    )
-    if re.search(r"\bvestid\w*\b", details):
+def _virtual_try_on_category_for_type(product_type: str) -> str:
+    normalized_type = _normalize_search_text(product_type)
+    if normalized_type in EXCLUDED_CATALOG_FILTER_TYPES:
+        return "excluded"
+    if normalized_type == "vestido":
         return "dresses"
-    if re.search(
-        r"\b(?:blazer|blusa|camisa|chaqueta|polera|top|cardigan|sueter|"
-        r"poleron|abrigo|veston|hoodie|sudadera|camiseta|remera)\w*\b",
-        details,
-    ):
+    if normalized_type in VTON_UPPER_BODY_TYPES:
         return "upper_body"
-    return "lower_body"
+    if normalized_type in VTON_LOWER_BODY_TYPES:
+        return "lower_body"
+    return "other"
+
+
+def _virtual_try_on_category(product: ProductoVestua) -> str:
+    return _virtual_try_on_category_for_type(product.tipo_prenda)
+
+
+def _catalog_type_filter_groups(
+    types: Tuple[str, ...],
+) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+    categories = (
+        ("Prendas superiores", "upper_body"),
+        ("Prendas inferiores", "lower_body"),
+        ("Vestidos", "dresses"),
+        ("Otras prendas", "other"),
+    )
+    return tuple(
+        (
+            label,
+            tuple(
+                product_type
+                for product_type in types
+                if _virtual_try_on_category_for_type(product_type) == category
+            ),
+        )
+        for label, category in categories
+    )
 
 
 def _has_vestua_listing(prenda) -> bool:
@@ -505,6 +618,7 @@ def _catalog_product_card(
       data-catalog-reference="{escape(reference_label or 'Sin referencia', quote=True)}"
       data-catalog-price="{price_value}" data-catalog-fit-score="{fit_score}"
       data-catalog-index="{indice}" data-catalog-type="{escape(product.tipo_prenda, quote=True)}"
+      data-catalog-try-on-category="{_virtual_try_on_category(product)}"
       data-catalog-searchable="{escape((store + ' ' + product.titulo + ' ' + product.marca + ' ' + product.categorias_catalogo).casefold(), quote=True)}">
       <label class="catalog-select">
         <input type="checkbox" data-catalog-select
@@ -536,8 +650,16 @@ def _garment_catalog(
     query = query or {}
     catalog_data = _catalog_page_data(query, perfil, preferencia)
     type_options = _option("", "Todos los tipos", query.get("type", "")) + "".join(
-        _option(product_type, product_type, query.get("type", ""))
-        for product_type in catalog_data["types"]
+        f'<optgroup label="{escape(group_label, quote=True)}">'
+        + "".join(
+            _option(product_type, product_type, query.get("type", ""))
+            for product_type in grouped_types
+        )
+        + "</optgroup>"
+        for group_label, grouped_types in _catalog_type_filter_groups(
+            catalog_data["types"]
+        )
+        if grouped_types
     )
     size_options = _option("", "Todas las tallas", query.get("size", "")) + "".join(
         _option(size, size, query.get("size", ""))
@@ -624,26 +746,66 @@ def _virtual_try_on_panel() -> str:
         '<p data-vton-person-empty>No hay una foto seleccionada en esta sesión. '
         '<a href="/" data-vton-return-home>Ve a Inicio y selecciona una foto.</a></p>'
         '</div>'
-        '<div class="try-on-controls">'
-        '<label for="vton-product-search">Buscar una prenda del catálogo'
-        '<input id="vton-product-search" type="search" data-vton-product-search '
-        'placeholder="Nombre, marca o tienda" autocomplete="off"></label>'
-        '<label for="vton-product-select">Prendas'
-        '<select id="vton-product-select" data-vton-product-select size="7">'
-        '<option value="">Selecciona desde Catálogo o busca una prenda</option>'
-        '</select></label>'
-        '<button class="matices-button matices-button-primary" type="button" '
-        'data-vton-generate disabled>Probar</button>'
-        '<div class="try-on-garment-preview">'
-        '<img data-vton-garment-preview alt="Imagen de la prenda seleccionada" hidden>'
-        '<p data-vton-garment-empty>Selecciona una prenda para ver su imagen.</p>'
-        '</div>'
-        '</div></div>'
-        '<p class="try-on-status" data-vton-status role="status" aria-live="polite"></p>'
+        '<div class="try-on-output" data-vton-output aria-live="polite">'
         '<figure class="try-on-result" data-vton-result hidden>'
         '<figcaption data-vton-result-status></figcaption>'
         '<img data-vton-result-image alt="Resultado de la prueba virtual">'
         '</figure>'
+        '</div></div>'
+        '<div class="try-on-controls">'
+        '<span class="try-on-product-label" id="vton-product-list-label">'
+        'Prendas</span>'
+        '<div class="try-on-product-list" data-vton-product-list '
+        'aria-labelledby="vton-product-list-label">'
+        '<section class="try-on-product-group" '
+        'data-vton-product-group="upper_body" '
+        'aria-labelledby="vton-upper-products-label">'
+        '<h3 id="vton-upper-products-label">Prendas superiores</h3>'
+        '<div class="try-on-product-options" '
+        'data-vton-product-options="upper_body"></div>'
+        '</section>'
+        '<section class="try-on-product-group" '
+        'data-vton-product-group="lower_body" '
+        'aria-labelledby="vton-lower-products-label">'
+        '<h3 id="vton-lower-products-label">Prendas inferiores</h3>'
+        '<div class="try-on-product-options" '
+        'data-vton-product-options="lower_body"></div>'
+        '</section>'
+        '</div>'
+        '<p class="try-on-selection-hint">Puedes combinar una prenda '
+        'superior y una inferior.</p>'
+        '<label class="try-on-provider-label" for="vton-provider">'
+        'Proveedor de prueba'
+        '<select id="vton-provider" data-vton-provider>'
+        '<option value="automatic">Automático</option>'
+        '<option value="rapidapi">Try on Clothes Pro</option>'
+        '<option value="datatobiz">DataToBiz</option>'
+        '<option value="diffusion">Try-On Diffusion</option>'
+        '<option value="refiner">Try on Clothes Refiner</option>'
+        '</select>'
+        '</label>'
+        '<p class="try-on-provider-hint" id="vton-provider-help">'
+        'DataToBiz admite una sola prenda superior.</p>'
+        '<label class="try-on-provider-label" data-vton-gender-field hidden>'
+        'Género para Clothes Refiner'
+        '<select data-vton-gender>'
+        '<option value="woman" selected>Mujer</option>'
+        '<option value="man">Hombre</option>'
+        '</select>'
+        '</label>'
+        '<select id="vton-product-select" data-vton-product-select multiple '
+        'hidden aria-hidden="true" tabindex="-1">'
+        '<option value="">Selecciona una prenda desde Catálogo</option>'
+        '</select>'
+        '<div class="try-on-hover-tooltip" data-vton-garment-tooltip '
+        'role="tooltip" hidden>'
+        '<img data-vton-tooltip-image alt="">'
+        '<span data-vton-tooltip-title></span>'
+        '</div>'
+        '<button class="matices-button matices-button-primary" type="button" '
+        'data-vton-generate disabled>Probar</button>'
+        '</div>'
+        '<p class="try-on-status" data-vton-status role="status" aria-live="polite"></p>'
         '</section>'
     )
 
@@ -663,7 +825,15 @@ def _catalog_page_data(
     preferencia = preferencia or query.get("preference", "regular")
     recommendations = _catalog_recommendations(perfil, preferencia)
     types = tuple(
-        sorted({product.tipo_prenda for product in CATALOG_PRODUCTS}, key=str.casefold)
+        sorted(
+            {
+                product.tipo_prenda
+                for product in CATALOG_PRODUCTS
+                if _normalize_search_text(product.tipo_prenda)
+                not in EXCLUDED_CATALOG_FILTER_TYPES
+            },
+            key=str.casefold,
+        )
     )
     sizes = tuple(
         sorted(
@@ -679,6 +849,8 @@ def _catalog_page_data(
     )
     normalized_search = _normalize_search_text(query.get("search", ""))
     selected_type = query.get("type", "")
+    if selected_type not in types:
+        selected_type = ""
     selected_size = query.get("size", "")
     selected_brand = query.get("brand", "")
     try:
@@ -774,10 +946,16 @@ def _catalog_page_data(
     }
 
 
-def _virtual_try_on_products(search: str) -> Dict[str, object]:
+def _virtual_try_on_products(
+    search: str,
+    product_urls: Tuple[str, ...] = (),
+) -> Dict[str, object]:
     normalized_search = _normalize_search_text(search.strip())
+    requested_urls = set(product_urls)
     products = []
     for product in CATALOG_PRODUCTS:
+        if requested_urls and product.url not in requested_urls:
+            continue
         if (
             normalized_search
             and normalized_search not in CATALOG_SEARCH_TEXT_BY_URL[product.url]
@@ -795,7 +973,7 @@ def _virtual_try_on_products(search: str) -> Dict[str, object]:
                 "category": _virtual_try_on_category(product),
             }
         )
-        if len(products) == 24:
+        if not requested_urls and len(products) == 24:
             break
     return {"products": products}
 
@@ -810,6 +988,632 @@ def _supabase_user_for_token(access_token: str) -> object:
     )
     with urlopen(request, timeout=10) as response:
         return json.loads(response.read(65536).decode("utf-8"))
+
+
+def _download_catalog_image(image_url: str) -> bytes:
+    parsed_url = urlparse(image_url)
+    if parsed_url.scheme != "https" or not parsed_url.netloc:
+        raise ValueError("La imagen del catálogo no tiene una URL segura.")
+    request = Request(image_url, headers={"User-Agent": "CalceMatices/1.0"})
+    with urlopen(request, timeout=30) as response:
+        image = response.read(MAX_CATALOG_IMAGE_BYTES + 1)
+    if len(image) > MAX_CATALOG_IMAGE_BYTES:
+        raise ValueError("La imagen del catálogo supera el límite permitido.")
+    if not image:
+        raise ValueError("No se pudo descargar la imagen del catálogo.")
+    return image
+
+
+def _prepare_rapidapi_image(image_bytes: bytes, label: str) -> bytes:
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            if max(source.size) > 4096:
+                raise ValueError(
+                    f"{label} no puede superar 4096 píxeles por lado."
+                )
+            image = ImageOps.exif_transpose(source)
+            if min(image.size) < 150:
+                raise ValueError(
+                    f"{label} debe medir al menos 150 × 150 píxeles."
+                )
+            if "A" in image.getbands() or "transparency" in image.info:
+                rgba = image.convert("RGBA")
+                image = Image.new("RGB", rgba.size, "white")
+                image.paste(rgba, mask=rgba.getchannel("A"))
+            else:
+                image = image.convert("RGB")
+            image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+            for quality in (85, 75, 65):
+                output = io.BytesIO()
+                image.save(
+                    output,
+                    format="JPEG",
+                    quality=quality,
+                    optimize=True,
+                )
+                prepared_image = output.getvalue()
+                if len(prepared_image) <= MAX_RAPIDAPI_IMAGE_BYTES:
+                    return prepared_image
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
+        raise ValueError(f"{label} no es una imagen compatible.") from error
+    raise ValueError(f"{label} supera el límite de 5 MB.")
+
+
+def _upper_body_reference_image(person_image: bytes) -> bytes:
+    from PIL import Image, ImageOps
+
+    with Image.open(io.BytesIO(person_image)) as source:
+        image = ImageOps.exif_transpose(source)
+        width, height = image.size
+        crop = image.crop(
+            (
+                round(width * 0.15),
+                round(height * 0.18),
+                round(width * 0.85),
+                round(height * 0.66),
+            )
+        ).convert("RGB")
+        if min(crop.size) < 150:
+            scale = max(150 / crop.width, 150 / crop.height)
+            crop = crop.resize(
+                (
+                    round(crop.width * scale),
+                    round(crop.height * scale),
+                ),
+                Image.Resampling.LANCZOS,
+            )
+        output = io.BytesIO()
+        crop.save(output, format="JPEG", quality=85, optimize=True)
+    return _prepare_rapidapi_image(
+        output.getvalue(),
+        "La referencia superior recortada",
+    )
+
+
+def _read_rapidapi_json(response) -> Dict[str, object]:
+    response_body = response.read(MAX_RAPIDAPI_RESPONSE_BYTES + 1)
+    if len(response_body) > MAX_RAPIDAPI_RESPONSE_BYTES:
+        raise ValueError("RapidAPI devolvió una respuesta demasiado grande.")
+    try:
+        result = json.loads(response_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("RapidAPI devolvió una respuesta inválida.") from error
+    if not isinstance(result, dict):
+        raise ValueError("RapidAPI devolvió una respuesta inválida.")
+    error_code = result.get("error_code")
+    if error_code not in (0, "0"):
+        error_message = result.get("error_msg")
+        detail = (
+            error_message.strip()[:200]
+            if isinstance(error_message, str) and error_message.strip()
+            else f"código {error_code}"
+        )
+        raise ValueError(f"RapidAPI no pudo procesar la tarea ({detail}).")
+    return result
+
+
+def _rapidapi_http_error_detail(error: HTTPError) -> str:
+    try:
+        body = error.read(4096).decode("utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    if not body:
+        return ""
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return body[:240]
+    if isinstance(payload, dict):
+        for key in ("message", "error", "detail", "error_msg", "description"):
+            detail = payload.get(key)
+            if isinstance(detail, str) and detail.strip():
+                return detail.strip()[:240]
+    return body[:240]
+
+
+def _rapidapi_task_result_for(
+    task_id: str,
+    host: str,
+    api_key: str,
+    endpoint: str,
+    provider_name: str,
+) -> str:
+    deadline = time.monotonic() + RAPIDAPI_TASK_TIMEOUT_SECONDS
+    request_url = (
+        f"{endpoint}?"
+        f"{urlencode({'task_id': task_id})}"
+    )
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"{provider_name} tardó demasiado en generar la imagen."
+            )
+        request = Request(
+            request_url,
+            headers={
+                "x-rapidapi-key": api_key,
+                "x-rapidapi-host": host,
+                "Accept": "application/json",
+            },
+        )
+        with urlopen(request, timeout=min(20, remaining)) as response:
+            result = _read_rapidapi_json(response)
+        task_status = result.get("task_status")
+        if task_status == 2:
+            output = result.get("output")
+            image_url = (
+                output.get("image_url")
+                if isinstance(output, dict)
+                else None
+            )
+            parsed_url = (
+                urlparse(image_url)
+                if isinstance(image_url, str)
+                else None
+            )
+            if (
+                not parsed_url
+                or parsed_url.scheme != "https"
+                or not parsed_url.netloc
+            ):
+                raise ValueError(
+                    f"{provider_name} no devolvió una URL de imagen válida."
+                )
+            return image_url
+        if task_status not in (0, 1):
+            raise ValueError(
+                f"{provider_name} devolvió un estado de tarea inesperado."
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"{provider_name} tardó demasiado en generar la imagen."
+            )
+        time.sleep(min(RAPIDAPI_POLL_INTERVAL_SECONDS, remaining))
+
+
+def _rapidapi_task_result(task_id: str) -> str:
+    return _rapidapi_task_result_for(
+        task_id,
+        RAPIDAPI_HOST,
+        RAPIDAPI_KEY,
+        RAPIDAPI_TASK_RESULT_ENDPOINT,
+        "Try on Clothes Pro",
+    )
+
+
+def _rapidapi_try_on(
+    person_image: bytes,
+    products: Tuple[ProductoVestua, ...],
+) -> Dict[str, str]:
+    categories = {
+        _virtual_try_on_category(product): product
+        for product in products
+    }
+    if len(products) == 2 and set(categories) != {"upper_body", "lower_body"}:
+        raise ValueError("Combina una prenda superior con una inferior.")
+    if len(products) == 1 and not set(categories).issubset(
+        {"upper_body", "lower_body", "dresses"}
+    ):
+        raise ValueError("El Probador solo admite prendas superiores, inferiores o vestidos.")
+    if len(products) not in (1, 2):
+        raise ValueError("Selecciona una prenda superior y una inferior como máximo.")
+
+    def prepare_selected_garment(product: ProductoVestua, label: str) -> bytes:
+        product_image_url = CATALOG_IMAGES_BY_URL.get(product.url)
+        if not product_image_url:
+            raise ValueError(f"{label} no tiene una imagen disponible.")
+        return _prepare_rapidapi_image(
+            _download_catalog_image(product_image_url),
+            label,
+        )
+
+    files = {
+        "person_image": ("person.jpg", person_image, "image/jpeg"),
+    }
+    top_product = categories.get("upper_body") or categories.get("dresses")
+    bottom_product = categories.get("lower_body")
+    if bottom_product and not top_product:
+        top_garment = _upper_body_reference_image(person_image)
+        files["top_garment"] = ("top-garment.jpg", top_garment, "image/jpeg")
+
+    garment_jobs = []
+    if top_product:
+        garment_jobs.append(
+            ("top_garment", "top-garment.jpg", top_product, "La prenda superior")
+        )
+    if bottom_product:
+        garment_jobs.append(
+            (
+                "bottom_garment",
+                "bottom-garment.jpg",
+                bottom_product,
+                "La prenda inferior",
+            )
+        )
+    if len(garment_jobs) == 2:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(prepare_selected_garment, job[2], job[3])
+                for job in garment_jobs
+            ]
+            for job, future in zip(garment_jobs, futures):
+                files[job[0]] = (job[1], future.result(), "image/jpeg")
+    else:
+        for field, filename, product, label in garment_jobs:
+            files[field] = (
+                filename,
+                prepare_selected_garment(product, label),
+                "image/jpeg",
+            )
+
+    body, boundary = _multipart_form(
+        {"task_type": "async", "resolution": "1024"},
+        files,
+    )
+    request = Request(
+        RAPIDAPI_ENDPOINT,
+        data=body,
+        headers={
+            "x-rapidapi-key": RAPIDAPI_KEY,
+            "x-rapidapi-host": RAPIDAPI_HOST,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=30) as response:
+        result = _read_rapidapi_json(response)
+    task_id = result.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        raise ValueError("RapidAPI no devolvió un identificador de tarea.")
+    return {"result_image_url": _rapidapi_task_result(task_id)}
+
+
+def _multipart_form(
+    fields: Dict[str, str],
+    files: Dict[str, Tuple[str, bytes, str]],
+) -> Tuple[bytes, str]:
+    boundary = f"----CalceMatices{uuid.uuid4().hex}"
+    parts = []
+    for name, value in fields.items():
+        parts.extend(
+            (
+                f"--{boundary}\r\n".encode("ascii"),
+                (
+                    f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                ).encode("ascii"),
+                value.encode("utf-8"),
+                b"\r\n",
+            )
+        )
+    for name, (filename, content, content_type) in files.items():
+        parts.extend(
+            (
+                f"--{boundary}\r\n".encode("ascii"),
+                (
+                    f'Content-Disposition: form-data; name="{name}"; '
+                    f'filename="{filename}"\r\n'
+                ).encode("ascii"),
+                f"Content-Type: {content_type}\r\n\r\n".encode("ascii"),
+                content,
+                b"\r\n",
+            )
+        )
+    parts.append(f"--{boundary}--\r\n".encode("ascii"))
+    return b"".join(parts), boundary
+
+
+def _image_mime_type(image: bytes) -> Optional[str]:
+    if image.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if image.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if image.startswith(b"RIFF") and image[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _datatobiz_result_source(value: object) -> Optional[Tuple[str, str]]:
+    if isinstance(value, dict):
+        for key in ("result_image_url", "image_url", "imageUrl", "output_url", "url"):
+            image_url = value.get(key)
+            if isinstance(image_url, str):
+                parsed_url = urlparse(image_url)
+                if parsed_url.scheme == "https" and parsed_url.netloc:
+                    return "result_image_url", image_url
+        for key in (
+            "result_image",
+            "image_base64",
+            "image",
+            "output",
+            "result",
+            "data",
+        ):
+            source = _datatobiz_result_source(value.get(key))
+            if source:
+                return source
+    elif isinstance(value, str):
+        if value.startswith("data:image/"):
+            mime_type, separator, encoded_image = value.partition(";base64,")
+            if separator and mime_type in {
+                "data:image/jpeg",
+                "data:image/png",
+                "data:image/webp",
+            }:
+                try:
+                    image = base64.b64decode(encoded_image, validate=True)
+                except (binascii.Error, ValueError):
+                    return None
+                detected_mime_type = _image_mime_type(image)
+                if detected_mime_type == mime_type[5:]:
+                    return "result_image_data_url", value
+        parsed_url = urlparse(value)
+        if parsed_url.scheme == "https" and parsed_url.netloc:
+            return "result_image_url", value
+        try:
+            image = base64.b64decode(value, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+        mime_type = _image_mime_type(image)
+        if mime_type:
+            image_data_url = (
+                f"data:{mime_type};base64,"
+                f"{base64.b64encode(image).decode('ascii')}"
+            )
+            return "result_image_data_url", image_data_url
+    return None
+
+
+def _datatobiz_response_source(response) -> Tuple[str, str]:
+    response_body = response.read(MAX_DATATOBIZ_RESPONSE_BYTES + 1)
+    if len(response_body) > MAX_DATATOBIZ_RESPONSE_BYTES:
+        raise ValueError("DataToBiz devolvió una respuesta demasiado grande.")
+    content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+    mime_type = _image_mime_type(response_body)
+    if mime_type and (
+        content_type == mime_type
+        or content_type == "application/octet-stream"
+    ):
+        return (
+            "result_image_data_url",
+            f"data:{mime_type};base64,"
+            f"{base64.b64encode(response_body).decode('ascii')}",
+        )
+    if content_type.startswith("image/"):
+        raise ValueError("DataToBiz devolvió un formato de imagen no compatible.")
+    try:
+        payload = json.loads(response_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = response_body.decode("utf-8", errors="replace").strip()
+    image_source = _datatobiz_result_source(payload)
+    if image_source:
+        return image_source
+    raise ValueError("DataToBiz no devolvió una imagen en un formato reconocido.")
+
+
+def _datatobiz_try_on(
+    person_image: bytes,
+    product: ProductoVestua,
+) -> Dict[str, str]:
+    product_image_url = CATALOG_IMAGES_BY_URL.get(product.url)
+    if not product_image_url:
+        raise ValueError("La prenda superior no tiene una imagen disponible.")
+    garment_image = _prepare_rapidapi_image(
+        _download_catalog_image(product_image_url),
+        "La prenda superior",
+    )
+    body, boundary = _multipart_form(
+        {},
+        {
+            "personImage": ("person.jpg", person_image, "image/jpeg"),
+            "clothImage": ("cloth.jpg", garment_image, "image/jpeg"),
+        },
+    )
+    request = Request(
+        DATATOBIZ_RAPIDAPI_ENDPOINT,
+        data=body,
+        headers={
+            "x-rapidapi-key": DATATOBIZ_RAPIDAPI_KEY,
+            "x-rapidapi-host": DATATOBIZ_RAPIDAPI_HOST,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json, image/*",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=180) as response:
+        source_key, image_source = _datatobiz_response_source(response)
+    return {source_key: image_source}
+
+
+def _try_on_diffusion_response_source(response) -> Tuple[str, str]:
+    response_body = response.read(MAX_DATATOBIZ_RESPONSE_BYTES + 1)
+    if len(response_body) > MAX_DATATOBIZ_RESPONSE_BYTES:
+        raise ValueError("Try-On Diffusion devolvió una respuesta demasiado grande.")
+    content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+    mime_type = _image_mime_type(response_body)
+    if mime_type and (
+        content_type == mime_type
+        or content_type == "application/octet-stream"
+    ):
+        return (
+            "result_image_data_url",
+            f"data:{mime_type};base64,"
+            f"{base64.b64encode(response_body).decode('ascii')}",
+        )
+    if content_type.startswith("image/"):
+        raise ValueError("Try-On Diffusion devolvió una imagen no compatible.")
+    try:
+        payload = json.loads(response_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = response_body.decode("utf-8", errors="replace").strip()
+    image_source = _datatobiz_result_source(payload)
+    if image_source:
+        return image_source
+    raise ValueError("Try-On Diffusion no devolvió una imagen reconocible.")
+
+
+def _try_on_diffusion(
+    person_image: bytes,
+    product: ProductoVestua,
+) -> Dict[str, str]:
+    product_image_url = CATALOG_IMAGES_BY_URL.get(product.url)
+    if not product_image_url:
+        raise ValueError("La prenda seleccionada no tiene una imagen disponible.")
+    garment_image = _prepare_rapidapi_image(
+        _download_catalog_image(product_image_url),
+        "La prenda seleccionada",
+    )
+    body, boundary = _multipart_form(
+        {},
+        {
+            "avatar_image": ("avatar.jpg", person_image, "image/jpeg"),
+            "clothing_image": ("clothing.jpg", garment_image, "image/jpeg"),
+        },
+    )
+    request = Request(
+        DIFFUSION_RAPIDAPI_ENDPOINT,
+        data=body,
+        headers={
+            "x-rapidapi-key": RAPIDAPI_DIFFUSION_KEY,
+            "x-rapidapi-host": DIFFUSION_RAPIDAPI_HOST,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json, image/*",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=180) as response:
+        source_key, image_source = _try_on_diffusion_response_source(response)
+    return {source_key: image_source}
+
+
+def _try_on_clothes_refiner(
+    person_image: bytes,
+    coarse_image_url: str,
+    products: Tuple[ProductoVestua, ...],
+    gender: str,
+) -> Dict[str, str]:
+    categories = {
+        _virtual_try_on_category(product): product
+        for product in products
+    }
+    top_product = categories.get("upper_body") or categories.get("dresses")
+    bottom_product = categories.get("lower_body")
+    top_image = (
+        _prepare_rapidapi_image(
+            _download_catalog_image(CATALOG_IMAGES_BY_URL[top_product.url]),
+            "La prenda superior",
+        )
+        if top_product
+        else _upper_body_reference_image(person_image)
+    )
+    coarse_image = _prepare_rapidapi_image(
+        _download_catalog_image(coarse_image_url),
+        "El resultado preliminar",
+    )
+    files = {
+        "coarse_image": ("coarse.jpg", coarse_image, "image/jpeg"),
+        "person_image": ("person.jpg", person_image, "image/jpeg"),
+        "top_garment": ("top-garment.jpg", top_image, "image/jpeg"),
+    }
+    if bottom_product:
+        bottom_image_url = CATALOG_IMAGES_BY_URL.get(bottom_product.url)
+        if not bottom_image_url:
+            raise ValueError("La prenda inferior no tiene una imagen disponible.")
+        files["bottom_garment"] = (
+            "bottom-garment.jpg",
+            _prepare_rapidapi_image(
+                _download_catalog_image(bottom_image_url),
+                "La prenda inferior",
+            ),
+            "image/jpeg",
+        )
+    body, boundary = _multipart_form(
+        {"task_type": "async", "gender": gender},
+        files,
+    )
+    request = Request(
+        REFINER_RAPIDAPI_ENDPOINT,
+        data=body,
+        headers={
+            "x-rapidapi-key": RAPIDAPI_REFINER_KEY,
+            "x-rapidapi-host": REFINER_RAPIDAPI_HOST,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=30) as response:
+        result = _read_rapidapi_json(response)
+    task_id = result.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        raise ValueError(
+            "Try on Clothes Refiner no devolvió un identificador de tarea."
+        )
+    result_image_url = _rapidapi_task_result_for(
+        task_id,
+        REFINER_RAPIDAPI_HOST,
+        RAPIDAPI_REFINER_KEY,
+        REFINER_RAPIDAPI_TASK_RESULT_ENDPOINT,
+        "Try on Clothes Refiner",
+    )
+    return {"result_image_url": result_image_url}
+
+
+def _supports_datatobiz_fallback(
+    products: Tuple[ProductoVestua, ...],
+) -> bool:
+    return (
+        len(products) == 1
+        and _virtual_try_on_category(products[0]) == "upper_body"
+    )
+
+
+def _try_on_with_fallback(
+    person_image: bytes,
+    products: Tuple[ProductoVestua, ...],
+) -> Dict[str, str]:
+    primary_error = None
+    if RAPIDAPI_KEY:
+        try:
+            return _rapidapi_try_on(person_image, products)
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            OSError,
+            IncompleteRead,
+            ValueError,
+        ) as error:
+            primary_error = error
+
+    fallback_key = DATATOBIZ_RAPIDAPI_KEY
+    if _supports_datatobiz_fallback(products) and fallback_key:
+        try:
+            result = _datatobiz_try_on(person_image, products[0])
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            OSError,
+            IncompleteRead,
+            ValueError,
+        ) as fallback_error:
+            if primary_error:
+                raise TryOnProvidersError(primary_error, fallback_error) from fallback_error
+            raise
+        result["detail"] = "Resultado Probador (respaldo DataToBiz)"
+        return result
+
+    if primary_error:
+        raise primary_error
+    raise ValueError(
+        "Configura RAPIDAPI_KEY para usar Try on Clothes Pro. DataToBiz solo "
+        "admite una prenda superior individual como alternativa."
+    )
 
 
 @lru_cache(maxsize=8)
@@ -1716,13 +2520,13 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
             self._send_content("ok", "text/plain; charset=utf-8")
             return
         if parsed.path == "/api/vton-products":
-            query = {
-                key: values[-1]
-                for key, values in parse_qs(
-                    parsed.query, keep_blank_values=True
-                ).items()
-            }
-            self._send_json(_virtual_try_on_products(query.get("search", "")))
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            self._send_json(
+                _virtual_try_on_products(
+                    query.get("search", [""])[-1],
+                    tuple(query.get("product_url", [])[:24]),
+                )
+            )
             return
         if parsed.path == "/api/catalog":
             query = {
@@ -1834,7 +2638,7 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
             return
         if content_length > MAX_VTON_REQUEST_BYTES:
             self._send_json(
-                {"error": "La foto supera el límite de 10 MB."}, 413
+                {"error": "La solicitud supera el límite permitido."}, 413
             )
             return
 
@@ -1853,15 +2657,43 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        person_image_base64 = payload.get("person_image_base64")
-        product_url = payload.get("product_url")
-        if not isinstance(person_image_base64, str) or not isinstance(product_url, str):
+        provider = payload.get("provider", "automatic")
+        if provider not in (
+            "automatic",
+            "rapidapi",
+            "datatobiz",
+            "diffusion",
+            "refiner",
+        ):
             self._send_json(
-                {
-                    "error": (
-                        "Se requieren la foto de Inicio y una prenda del catálogo."
-                    )
-                },
+                {"error": "Selecciona un proveedor de prueba válido."}, 400
+            )
+            return
+        gender = payload.get("gender", "woman")
+        if provider == "refiner" and gender not in ("woman", "man"):
+            self._send_json(
+                {"error": "Selecciona un género válido para Clothes Refiner."},
+                400,
+            )
+            return
+        person_image_base64 = payload.get("person_image_base64")
+        product_urls = payload.get("product_urls")
+        if product_urls is None:
+            legacy_product_url = payload.get("product_url")
+            product_urls = (
+                [legacy_product_url]
+                if isinstance(legacy_product_url, str)
+                else None
+            )
+        if (
+            not isinstance(person_image_base64, str)
+            or not isinstance(product_urls, list)
+            or not 1 <= len(product_urls) <= 2
+            or any(not isinstance(product_url, str) for product_url in product_urls)
+            or len(set(product_urls)) != len(product_urls)
+        ):
+            self._send_json(
+                {"error": "Se requieren la foto y una o dos prendas distintas."},
                 400,
             )
             return
@@ -1881,55 +2713,261 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
             return
         if len(person_image) > MAX_VTON_IMAGE_BYTES:
             self._send_json(
-                {"error": "La foto supera el límite de 10 MB."}, 413
+                {"error": "La foto supera el límite de 5 MB."}, 413
             )
+            return
+        try:
+            person_image = _prepare_rapidapi_image(
+                person_image,
+                "La foto de Inicio",
+            )
+        except ValueError as error:
+            self._send_json({"error": str(error)}, 400)
             return
 
-        product = CATALOG_PRODUCTS_BY_URL.get(product_url)
-        if product is None:
+        products = []
+        for product_url in product_urls:
+            product = CATALOG_PRODUCTS_BY_URL.get(product_url)
+            if product is None:
+                self._send_json(
+                    {"error": "Una prenda seleccionada no está en el catálogo."},
+                    404,
+                )
+                return
+            products.append(product)
+        selected_products = tuple(products)
+        categories = tuple(
+            _virtual_try_on_category(product)
+            for product in selected_products
+        )
+        supported_single_categories = {"upper_body", "lower_body", "dresses"}
+        if (
+            len(selected_products) == 1
+            and categories[0] not in supported_single_categories
+        ):
             self._send_json(
-                {"error": "La prenda seleccionada no está en el catálogo."},
-                404,
+                {"error": "El Probador solo admite prendas superiores, inferiores o vestidos."},
+                400,
             )
             return
-        if not VTON_API_URL or not VTON_API_TOKEN:
+        if len(selected_products) == 2 and set(categories) != {
+            "upper_body",
+            "lower_body",
+        }:
+            self._send_json(
+                {"error": "Para combinar prendas, selecciona una superior y una inferior."},
+                400,
+            )
+            return
+        if provider == "datatobiz" and not _supports_datatobiz_fallback(
+            selected_products
+        ):
+            self._send_json(
+                {"error": "DataToBiz solo admite una prenda superior individual."},
+                400,
+            )
+            return
+        if provider == "rapidapi" and not RAPIDAPI_KEY:
+            self._send_json(
+                {"error": "Configura RAPIDAPI_KEY para usar Try on Clothes Pro."},
+                503,
+            )
+            return
+        if provider == "datatobiz" and not DATATOBIZ_RAPIDAPI_KEY:
             self._send_json(
                 {
                     "error": (
-                        "Configura VTON_API_URL y VTON_API_TOKEN en el servidor."
+                        "Configura DATATOBIZ_RAPIDAPI_KEY para usar "
+                        "DataToBiz de forma independiente."
                     )
                 },
                 503,
             )
             return
-        api_url = urlparse(VTON_API_URL)
-        if (
-            api_url.scheme != "https"
-            or not api_url.netloc
-            or api_url.username
-            or api_url.password
-        ):
+        if provider == "diffusion" and len(selected_products) != 1:
             self._send_json(
-                {"error": "VTON_API_URL debe ser una URL HTTPS válida."}, 503
+                {"error": "Try-On Diffusion admite una sola prenda por solicitud."},
+                400,
             )
             return
-
-        image_url = CATALOG_IMAGES_BY_URL[product.url]
-        try:
-            image_request = Request(
-                image_url,
-                headers={"User-Agent": "CalceMatices/1.0"},
+        if provider == "diffusion" and not RAPIDAPI_DIFFUSION_KEY:
+            self._send_json(
+                {"error": "Configura una clave RapidAPI para Try-On Diffusion."},
+                503,
             )
-            with urlopen(image_request, timeout=20) as image_response:
-                garment_image = image_response.read(
-                    MAX_VTON_IMAGE_BYTES + 1
-                )
-        except HTTPError as error:
+            return
+        if provider == "refiner" and (
+            not RAPIDAPI_KEY or not RAPIDAPI_REFINER_KEY
+        ):
             self._send_json(
                 {
                     "error": (
-                        "No se pudo descargar la imagen de la prenda "
+                        "Try on Clothes Refiner requiere RAPIDAPI_KEY para "
+                        "generar la imagen preliminar y RAPIDAPI_REFINER_KEY "
+                        "para refinarla."
+                    )
+                },
+                503,
+            )
+            return
+        if (
+            provider == "automatic"
+            and not RAPIDAPI_KEY
+            and not DATATOBIZ_RAPIDAPI_KEY
+        ):
+            self._send_json(
+                {
+                    "error": (
+                        "Configura RAPIDAPI_KEY o DATATOBIZ_RAPIDAPI_KEY "
+                        "en el servidor."
+                    )
+                },
+                503,
+            )
+            return
+        if (
+            provider == "automatic"
+            and not RAPIDAPI_KEY
+            and DATATOBIZ_RAPIDAPI_KEY
+            and not _supports_datatobiz_fallback(selected_products)
+        ):
+            self._send_json(
+                {
+                    "error": (
+                        "DataToBiz solo admite una prenda superior individual. "
+                        "Configura RAPIDAPI_KEY para probar prendas inferiores "
+                        "o combinaciones."
+                    )
+                },
+                503,
+            )
+            return
+
+        if provider == "automatic":
+            fallback_limit = (
+                ""
+                if _supports_datatobiz_fallback(selected_products)
+                else (
+                    " DataToBiz solo puede respaldar una prenda superior "
+                    "individual; no admite prendas inferiores, vestidos ni "
+                    "combinaciones."
+                )
+            )
+        elif provider == "rapidapi":
+            fallback_limit = (
+                " Modo directo seleccionado; no se intenta DataToBiz."
+            )
+        elif provider == "diffusion":
+            fallback_limit = (
+                " Modo directo seleccionado; no se intenta otra API."
+            )
+        elif provider == "refiner":
+            fallback_limit = (
+                " Refiner usa Try on Clothes Pro para generar la imagen "
+                "preliminar antes de refinarla."
+            )
+        else:
+            fallback_limit = ""
+        try:
+            if provider == "datatobiz":
+                result = _datatobiz_try_on(person_image, selected_products[0])
+                result["detail"] = "Resultado Probador (DataToBiz)"
+            elif provider == "rapidapi":
+                result = _rapidapi_try_on(person_image, selected_products)
+                result["detail"] = "Resultado Probador (Try on Clothes Pro)"
+            elif provider == "diffusion":
+                result = _try_on_diffusion(person_image, selected_products[0])
+                result["detail"] = "Resultado Probador (Try-On Diffusion)"
+            elif provider == "refiner":
+                coarse_result = _rapidapi_try_on(
+                    person_image,
+                    selected_products,
+                )
+                coarse_image_url = coarse_result.get("result_image_url")
+                if not coarse_image_url:
+                    raise ValueError(
+                        "Try on Clothes Pro no devolvió la imagen preliminar "
+                        "requerida por Refiner."
+                    )
+                result = _try_on_clothes_refiner(
+                    person_image,
+                    coarse_image_url,
+                    selected_products,
+                    gender,
+                )
+                result["detail"] = "Resultado Probador (Try on Clothes Refiner)"
+            else:
+                result = _try_on_with_fallback(person_image, selected_products)
+        except TryOnProvidersError as error:
+            def describe_provider_error(provider_error: Exception) -> str:
+                if isinstance(provider_error, HTTPError):
+                    detail = _rapidapi_http_error_detail(provider_error)
+                    return (
+                        f"HTTP {provider_error.code}: {detail}"
+                        if detail
+                        else f"HTTP {provider_error.code}"
+                    )
+                if isinstance(provider_error, ValueError):
+                    return str(provider_error)[:200]
+                return type(provider_error).__name__
+
+            self._send_json(
+                {
+                    "error": (
+                        "Fallaron Try on Clothes Pro y DataToBiz. "
+                        f"Principal: {describe_provider_error(error.primary_error)}. "
+                        f"Alternativa: {describe_provider_error(error.fallback_error)}."
+                    )
+                },
+                502,
+            )
+            return
+        except HTTPError as error:
+            if error.code == 429:
+                provider_name = (
+                    {
+                        "datatobiz": "DataToBiz",
+                        "diffusion": "Try-On Diffusion",
+                        "refiner": "Try on Clothes Refiner",
+                    }.get(provider, "Try on Clothes Pro")
+                )
+                message = (
+                    f"{provider_name} rechazó temporalmente la solicitud "
+                    "(HTTP 429). "
+                    "Puede ser un límite por minuto/segundo o del proveedor, "
+                    "aunque la cuota mensual no esté agotada."
+                )
+                message += fallback_limit
+                detail = _rapidapi_http_error_detail(error)
+                if detail:
+                    message += f" Detalle: {detail}"
+                retry_after = (
+                    error.headers.get("Retry-After")
+                    if error.headers
+                    else None
+                )
+                if retry_after:
+                    message += f" Reintenta después de: {retry_after}."
+                self._send_json(
+                    {"error": message},
+                    429,
+                )
+                return
+            provider_name = (
+                {
+                    "datatobiz": "DataToBiz",
+                    "diffusion": "Try-On Diffusion",
+                    "refiner": "Try on Clothes Refiner",
+                }.get(provider, "Try on Clothes Pro")
+            )
+            detail = _rapidapi_http_error_detail(error)
+            self._send_json(
+                {
+                    "error": (
+                        f"{provider_name} rechazó la solicitud "
                         f"(HTTP {error.code})."
+                        f"{f' Detalle: {detail}' if detail else ''}"
+                        f"{fallback_limit}"
                     )
                 },
                 502,
@@ -1937,91 +2975,37 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
             return
         except (URLError, TimeoutError, OSError, IncompleteRead) as error:
             self.log_error(
-                "Garment image download failed (%s)",
+                "RapidAPI try-on request failed (%s)",
                 type(error).__name__,
             )
-            self._send_json(
-                {"error": "No se pudo descargar la imagen de la prenda."},
-                502,
+            provider_name = (
+                {
+                    "datatobiz": "DataToBiz",
+                    "diffusion": "Try-On Diffusion",
+                    "refiner": "Try on Clothes Refiner",
+                }.get(provider, "Try on Clothes Pro")
             )
-            return
-        if not garment_image or len(garment_image) > MAX_VTON_IMAGE_BYTES:
             self._send_json(
                 {
                     "error": (
-                        "La imagen de la prenda está vacía o supera los 10 MB."
+                        "No se pudo descargar las imágenes o completar la "
+                        f"solicitud con {provider_name}.{fallback_limit}"
                     )
                 },
                 502,
             )
             return
-
-        modal_request = Request(
-            f"{VTON_API_URL}/try-on",
-            data=json.dumps(
-                {
-                    "person_image_base64": base64.b64encode(
-                        person_image
-                    ).decode("ascii"),
-                    "garment_image_base64": base64.b64encode(
-                        garment_image
-                    ).decode("ascii"),
-                    "category": _virtual_try_on_category(product),
-                }
-            ).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {VTON_API_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urlopen(modal_request, timeout=600) as modal_response:
-                modal_result = modal_response.read(
-                    MAX_VTON_REQUEST_BYTES + 1
-                )
-        except HTTPError as error:
+        except ValueError as error:
             self._send_json(
-                {"error": f"Modal rechazó la solicitud (HTTP {error.code})."},
+                {"error": f"{error}{fallback_limit}"},
                 502,
-            )
-            return
-        except (URLError, TimeoutError, OSError, IncompleteRead) as error:
-            self.log_error(
-                "Modal try-on request failed (%s)",
-                type(error).__name__,
-            )
-            self._send_json(
-                {"error": "No se pudo conectar con Modal."}, 502
-            )
-            return
-        if len(modal_result) > MAX_VTON_REQUEST_BYTES:
-            self._send_json(
-                {"error": "Modal devolvió una respuesta demasiado grande."},
-                502,
-            )
-            return
-        try:
-            result = json.loads(modal_result.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            self._send_json(
-                {"error": "Modal devolvió una respuesta inválida."}, 502
-            )
-            return
-
-        if (
-            not isinstance(result, dict)
-            or not isinstance(result.get("result_image_base64"), str)
-        ):
-            self._send_json(
-                {"error": "Modal no devolvió una imagen válida."}, 502
             )
             return
         self._send_json(
             {
-                "status": result.get("status", "success"),
-                "detail": result.get("detail", ""),
-                "result_image_base64": result["result_image_base64"],
+                "status": "success",
+                "detail": "Resultado Probador",
+                **result,
             }
         )
 
