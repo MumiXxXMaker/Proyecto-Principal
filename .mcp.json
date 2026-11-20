@@ -1,0 +1,15 @@
+{
+	"mcpServers": {
+		"RapidAPI Hub - Virtual Try On": {
+			"command": "npx",
+			"args": [
+				"mcp-remote",
+				"https://mcp.rapidapi.com",
+				"--header",
+				"x-api-host: virtual-try-on2.p.rapidapi.com",
+				"--header",
+				"x-api-key: ${RAPIDAPI_VIRTUAL_TRY_ON_API_KEY}"
+			]
+		}
+	}
+}

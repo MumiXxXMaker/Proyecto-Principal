@@ -8,7 +8,7 @@
   <meta name="supabase-publishable-key" content="{supabase_publishable_key}">
   <title>Calce Wardrobe</title>
   <link rel="icon" type="image/png" href="/assets/calce-isotipo.png">
-  <link rel="stylesheet" href="/styles.css?v=catalog-filter-layout-2">
+  <link rel="stylesheet" href="/styles.css?v=catalog-visual-redesign-17">
 </head>
 <body>
   <header><div class="wrap nav">
@@ -206,15 +206,28 @@
                 <input id="supabase-email" type="email" autocomplete="email"
                   placeholder="tu@correo.com" required>
               </label>
-              <label for="supabase-password">Contraseña
-                <input id="supabase-password" type="password" autocomplete="current-password"
-                  placeholder="Mínimo 8 caracteres" minlength="8" required>
-              </label>
-              <label class="supabase-confirm-password" for="supabase-password-confirm" hidden>
-                Confirmar contraseña
-                <input id="supabase-password-confirm" type="password"
-                  autocomplete="new-password" placeholder="Repite tu contraseña">
-              </label>
+              <div class="supabase-password-field">
+                <label for="supabase-password">Contraseña</label>
+                <div class="supabase-password-control">
+                  <input id="supabase-password" type="password" autocomplete="current-password"
+                    placeholder="Mínimo 8 caracteres" minlength="8" required>
+                  <button class="supabase-password-toggle" type="button"
+                    data-password-toggle="supabase-password"
+                    aria-controls="supabase-password" aria-label="Mostrar contraseña"
+                    aria-pressed="false">Mostrar</button>
+                </div>
+              </div>
+              <div class="supabase-password-field supabase-confirm-password" hidden>
+                <label for="supabase-password-confirm">Confirmar contraseña</label>
+                <div class="supabase-password-control">
+                  <input id="supabase-password-confirm" type="password"
+                    autocomplete="new-password" placeholder="Repite tu contraseña">
+                  <button class="supabase-password-toggle" type="button"
+                    data-password-toggle="supabase-password-confirm"
+                    aria-controls="supabase-password-confirm"
+                    aria-label="Mostrar contraseña" aria-pressed="false">Mostrar</button>
+                </div>
+              </div>
             </div>
             <label class="supabase-remember-session" data-remember-session-row for="supabase-remember-session">
               <input id="supabase-remember-session" type="checkbox">
@@ -316,6 +329,6 @@
       </div>
     </section>
   </div></main>
-  <script src="/app.js?v=catalog-filter-layout-2" defer></script>
+  <script src="/app.js?v=catalog-visual-redesign-17" defer></script>
 </body>
 </html>

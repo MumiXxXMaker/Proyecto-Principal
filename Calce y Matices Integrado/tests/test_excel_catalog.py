@@ -326,6 +326,13 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("data-catalog-type-filter", catalog)
         self.assertIn("data-catalog-size-filter", catalog)
         self.assertIn('class="catalog-sidebar"', catalog)
+        self.assertIn('data-catalog-filters-dialog', catalog)
+        self.assertIn("data-catalog-open-filters", catalog)
+        self.assertIn("data-catalog-apply-filters", catalog)
+        self.assertIn("data-catalog-clear-filters", catalog)
+        self.assertIn('data-catalog-view="5"', catalog)
+        self.assertIn('data-catalog-view="3"', catalog)
+        self.assertIn('data-catalog-view="2"', catalog)
         self.assertIn('data-catalog-page-size="20"', catalog)
         self.assertIn('data-catalog-previous disabled', catalog)
         self.assertIn(
@@ -333,8 +340,8 @@ class ExcelCatalogTests(unittest.TestCase):
             catalog,
         )
         self.assertLess(
-            catalog.index('data-catalog-page aria-live="polite"'),
             catalog.index("data-catalog-result-count"),
+            catalog.index("data-catalog-items"),
         )
         self.assertNotIn("Productos e imágenes se consultan en las tiendas enlazadas", catalog)
         self.assertNotIn('data-catalog-card hidden', catalog)
@@ -668,6 +675,11 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertLess(remember_position, auth_tabs_position)
         self.assertLess(auth_tabs_position, submit_actions_position)
         self.assertIn('id="supabase-password-confirm"', page)
+        self.assertIn('data-password-toggle="supabase-password"', page)
+        self.assertIn(
+            'data-password-toggle="supabase-password-confirm"',
+            page,
+        )
         self.assertIn('minlength="8"', page)
         self.assertIn(
             '<input id="supabase-remember-session" type="checkbox">',
@@ -801,6 +813,12 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('id="profile-panel" data-page-panel="profile"', profile_page)
         self.assertIn('id="profile-panel" data-page-panel="profile" hidden', try_on_page)
         self.assertIn("data-vton-product-select", try_on_page)
+        self.assertIn('data-vton-provider', try_on_page)
+        self.assertIn('<option value="automatic">Automático</option>', try_on_page)
+        self.assertIn('value="diffusion"', try_on_page)
+        self.assertIn('value="refiner"', try_on_page)
+        self.assertIn("data-vton-gender", try_on_page)
+        self.assertIn('<option value="woman" selected>Mujer</option>', try_on_page)
         self.assertIn("data-vton-generate", try_on_page)
         self.assertNotIn("data-vton-cart", try_on_page)
         self.assertNotIn("data-vton-confirmation", try_on_page)
@@ -808,6 +826,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertTrue(products)
         self.assertIn("image_url", products[0])
         self.assertIn("profileFirstNameInput", app_script)
+        self.assertIn("provider,", app_script)
         self.assertIn("return_view", app_script)
         self.assertIn("first_name text", schema)
         self.assertIn("last_name text", schema)
@@ -945,11 +964,16 @@ class ExcelCatalogTests(unittest.TestCase):
             "Usaremos la foto seleccionada en Inicio y una prenda del catálogo.",
             try_on_page,
         )
-        self.assertIn("data-vton-product-search", try_on_page)
+        self.assertNotIn("data-vton-product-search", try_on_page)
         self.assertIn(
-            '<option value="">Selecciona desde Catálogo o busca una prenda</option>',
+            '<option value="">Selecciona una prenda desde Catálogo</option>',
             try_on_page,
         )
+        self.assertIn(
+            'data-vton-product-list aria-labelledby="vton-product-list-label"',
+            try_on_page,
+        )
+        self.assertIn('data-vton-garment-tooltip role="tooltip"', try_on_page)
         self.assertIn(
             'data-vton-status role="status" aria-live="polite"></p>',
             try_on_page,
@@ -964,12 +988,16 @@ class ExcelCatalogTests(unittest.TestCase):
             try_on_page,
         )
         self.assertLess(
-            try_on_page.index("</select></label>"),
+            try_on_page.index("data-vton-product-list"),
             try_on_page.index("data-vton-generate disabled>Probar</button>"),
         )
         self.assertLess(
-            try_on_page.index("data-vton-generate disabled>Probar</button>"),
-            try_on_page.index('<div class="try-on-garment-preview">'),
+            try_on_page.index("data-vton-person-preview"),
+            try_on_page.index("data-vton-output"),
+        )
+        self.assertLess(
+            try_on_page.index("data-vton-output"),
+            try_on_page.index("data-vton-product-select"),
         )
         self.assertIn('data-page-panel="try-on"', try_on_page)
         self.assertNotIn("data-vton-cart", try_on_page)
