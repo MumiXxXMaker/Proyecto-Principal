@@ -117,6 +117,7 @@ MAX_CATALOG_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_RAPIDAPI_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_RAPIDAPI_RESPONSE_BYTES = 1024 * 1024
 MAX_DATATOBIZ_RESPONSE_BYTES = 20 * 1024 * 1024
+RAPIDAPI_EARLY_POLL_INTERVALS_SECONDS = (1, 2, 2)
 RAPIDAPI_POLL_INTERVAL_SECONDS = 5
 RAPIDAPI_TASK_TIMEOUT_SECONDS = 540
 
@@ -676,14 +677,46 @@ def _garment_catalog(
     page_number = catalog_data["page"] + 1
     page_count = catalog_data["pages"]
     visibility = "" if visible else " hidden"
+    search_term = query.get("search", "").strip()
+    heading = (
+        f'Tus resultados de búsqueda para <strong>{escape(search_term)}</strong>'
+        if search_term
+        else "Catálogo completo de prendas"
+    )
     return (
         '<section class="garment-catalog" id="garment-catalog" data-garment-catalog '
         f'data-catalog-page-index="{catalog_data["page"]}" '
         f'aria-labelledby="garment-catalog-title"{visibility}>'
         '<div class="catalog-shell">'
-        '<aside class="catalog-sidebar"><div class="catalog-filter-card">'
-        '<h3>Filtros</h3>'
-        '<div class="catalog-filters">'
+        '<div class="catalog-main">'
+        '<div class="catalog-heading"><div>'
+        f'<h2 id="garment-catalog-title" data-catalog-heading>{heading}</h2>'
+        '<p class="catalog-result-count" data-catalog-result-count '
+        f'aria-live="polite">{escape(catalog_data["result_text"])}</p></div>'
+        '<div class="catalog-toolbar-actions">'
+        '<button class="catalog-filter-trigger" type="button" '
+        'data-catalog-open-filters aria-haspopup="dialog" '
+        'aria-controls="catalog-filter-dialog" aria-expanded="false">'
+        '<svg aria-hidden="true" viewBox="0 0 20 20"><path d="M3 5h14M5.5 10h9M8 15h4"/></svg>'
+        '<span>Filtros</span><span class="catalog-filter-count" '
+        'data-catalog-filter-count>0</span></button>'
+        '<label class="catalog-sort-label" for="catalog-sort"><span>Ordenar por</span>'
+        '<select id="catalog-sort" data-catalog-sort>'
+        f'{sort_options}</select></label></div></div>'
+        '<div class="catalog-view-bar"><span class="catalog-view-count">'
+        f'{catalog_data["total"]} prendas</span>'
+        '<div class="catalog-view-controls" role="group" aria-label="Vista de productos">'
+        '<span>Vista</span>'
+        '<button type="button" data-catalog-view="5" aria-label="Vista de cinco columnas" '
+        'aria-pressed="true"><svg aria-hidden="true" viewBox="0 0 20 20">'
+        '<path d="M2 3h4v14H2zM8 3h4v14H8zM14 3h4v14h-4z"/></svg></button>'
+        '<button type="button" data-catalog-view="3" aria-label="Vista de tres columnas" '
+        'aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 20 20">'
+        '<path d="M2 3h7v14H2zM11 3h7v14h-7z"/></svg></button>'
+        '<button type="button" data-catalog-view="2" aria-label="Vista de dos columnas" '
+        'aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 20 20">'
+        '<path d="M2 2h7v7H2zM11 2h7v7h-7zM2 11h7v7H2zM11 11h7v7h-7z"/></svg></button>'
+        '</div></div>'
         '<form class="catalog-search-form" data-catalog-search-form action="/" method="get">'
         '<input type="hidden" name="view" value="catalog">'
         '<label class="visually-hidden" for="catalog-search">Buscar prendas</label>'
@@ -691,27 +724,38 @@ def _garment_catalog(
         f'value="{escape(query.get("search", ""), quote=True)}" '
         'placeholder="Buscar prendas" autocomplete="off">'
         '<button type="submit">Buscar</button></form>'
-        '<label>Tipo de prenda<select data-catalog-type-filter>'
-        f'{type_options}</select></label>'
-        '<label>Talla<select data-catalog-size-filter>'
-        f'{size_options}</select></label>'
-        '<label>Marca<select data-catalog-brand-filter>'
-        f'{brand_options}</select></label>'
-        '<fieldset class="catalog-price-range"><legend>Rango de precios (CLP)</legend>'
+        '<dialog class="catalog-filter-dialog" id="catalog-filter-dialog" '
+        'data-catalog-filters-dialog aria-labelledby="catalog-filter-title">'
+        '<div class="catalog-filter-dialog-content">'
+        '<header class="catalog-filter-dialog-header"><h2 id="catalog-filter-title">Filtros</h2>'
+        '<button type="button" data-catalog-clear-filters>Limpiar filtros</button>'
+        '<button class="catalog-filter-close" type="button" '
+        'data-catalog-close-filters aria-label="Cerrar filtros">×</button></header>'
+        '<aside class="catalog-sidebar"><div class="catalog-filter-card"><div class="catalog-filters">'
+        '<details class="catalog-filter-section" open><summary>Tipo de prenda</summary>'
+        '<label class="catalog-filter-field"><span>Tipo</span><select data-catalog-type-filter>'
+        f'{type_options}</select></label></details>'
+        '<details class="catalog-filter-section"><summary>Talla</summary>'
+        '<label class="catalog-filter-field"><span>Talla</span><select data-catalog-size-filter>'
+        f'{size_options}</select></label></details>'
+        '<details class="catalog-filter-section"><summary>Marca</summary>'
+        '<label class="catalog-filter-field"><span>Marca</span><select data-catalog-brand-filter>'
+        f'{brand_options}</select></label></details>'
+        '<details class="catalog-filter-section"><summary>Precio</summary>'
+        '<fieldset class="catalog-price-range"><legend>Rango en CLP</legend>'
         '<label>Desde<input type="number" min="0" step="1000" '
         f'data-catalog-min-price value="{escape(query.get("min_price", ""), quote=True)}"></label>'
         '<label>Hasta<input type="number" min="0" step="1000" '
         f'data-catalog-max-price value="{escape(query.get("max_price", ""), quote=True)}"></label>'
-        '</fieldset></div>'
-        '</div></aside>'
-        '<div class="catalog-main">'
-        '<div class="catalog-heading"><div>'
-        '<h2 id="garment-catalog-title">Catálogo completo de prendas</h2></div>'
-        '<label class="catalog-sort-label" for="catalog-sort">Ordenar por'
-        '<select id="catalog-sort" data-catalog-sort>'
-        f'{sort_options}</select></label></div>'
+        '</fieldset></details></div></div></aside>'
+        '<footer class="catalog-filter-dialog-footer"><button type="button" '
+        'data-catalog-apply-filters '
+        f'data-catalog-total="{catalog_data["total"]}">'
+        f'Mostrar {catalog_data["total"]} productos</button></footer>'
+        '</div></dialog>'
         f'<div class="catalog-grid" data-catalog-items '
-        f'data-catalog-page-size="{CATALOG_PAGE_SIZE}">{catalog_data["cards"]}</div>'
+        f'data-catalog-page-size="{CATALOG_PAGE_SIZE}" data-view="5">'
+        f'{catalog_data["cards"]}</div>'
         '<nav class="catalog-pagination" data-catalog-pagination '
         'aria-label="Paginación del catálogo">'
         f'<button type="button" data-catalog-previous'
@@ -721,9 +765,7 @@ def _garment_catalog(
         '<button type="button" data-catalog-next'
         f'{" disabled" if page_number >= page_count else ""}>Siguiente →</button>'
         '</nav>'
-        f'<p class="catalog-result-count" data-catalog-result-count '
-        f'aria-live="polite">{escape(catalog_data["result_text"])}</p>'
-        '<div class="catalog-selection-bar">'
+        '<div class="catalog-selection-bar" data-catalog-selection-bar hidden>'
         '<span data-catalog-selection-status aria-live="polite">Ninguna prenda seleccionada</span>'
         '<button class="catalog-try-on-button" type="button" data-catalog-try-on '
         'disabled>Selecciona prendas para probarte</button></div>'
@@ -1121,6 +1163,7 @@ def _rapidapi_task_result_for(
     provider_name: str,
 ) -> str:
     deadline = time.monotonic() + RAPIDAPI_TASK_TIMEOUT_SECONDS
+    poll_count = 0
     request_url = (
         f"{endpoint}?"
         f"{urlencode({'task_id': task_id})}"
@@ -1172,7 +1215,13 @@ def _rapidapi_task_result_for(
             raise TimeoutError(
                 f"{provider_name} tardó demasiado en generar la imagen."
             )
-        time.sleep(min(RAPIDAPI_POLL_INTERVAL_SECONDS, remaining))
+        poll_interval = (
+            RAPIDAPI_EARLY_POLL_INTERVALS_SECONDS[poll_count]
+            if poll_count < len(RAPIDAPI_EARLY_POLL_INTERVALS_SECONDS)
+            else RAPIDAPI_POLL_INTERVAL_SECONDS
+        )
+        time.sleep(min(poll_interval, remaining))
+        poll_count += 1
 
 
 def _rapidapi_task_result(task_id: str) -> str:
@@ -1185,10 +1234,10 @@ def _rapidapi_task_result(task_id: str) -> str:
     )
 
 
-def _rapidapi_try_on(
+def _prepare_rapidapi_garment_files(
     person_image: bytes,
     products: Tuple[ProductoVestua, ...],
-) -> Dict[str, str]:
+) -> Dict[str, Tuple[str, bytes, str]]:
     categories = {
         _virtual_try_on_category(product): product
         for product in products
@@ -1211,9 +1260,7 @@ def _rapidapi_try_on(
             label,
         )
 
-    files = {
-        "person_image": ("person.jpg", person_image, "image/jpeg"),
-    }
+    files: Dict[str, Tuple[str, bytes, str]] = {}
     top_product = categories.get("upper_body") or categories.get("dresses")
     bottom_product = categories.get("lower_body")
     if bottom_product and not top_product:
@@ -1249,7 +1296,17 @@ def _rapidapi_try_on(
                 prepare_selected_garment(product, label),
                 "image/jpeg",
             )
+    return files
 
+
+def _rapidapi_try_on_with_garments(
+    person_image: bytes,
+    garment_files: Dict[str, Tuple[str, bytes, str]],
+) -> Dict[str, str]:
+    files = {
+        "person_image": ("person.jpg", person_image, "image/jpeg"),
+        **garment_files,
+    }
     body, boundary = _multipart_form(
         {"task_type": "async", "resolution": "1024"},
         files,
@@ -1271,6 +1328,16 @@ def _rapidapi_try_on(
     if not isinstance(task_id, str) or not task_id:
         raise ValueError("RapidAPI no devolvió un identificador de tarea.")
     return {"result_image_url": _rapidapi_task_result(task_id)}
+
+
+def _rapidapi_try_on(
+    person_image: bytes,
+    products: Tuple[ProductoVestua, ...],
+) -> Dict[str, str]:
+    return _rapidapi_try_on_with_garments(
+        person_image,
+        _prepare_rapidapi_garment_files(person_image, products),
+    )
 
 
 def _multipart_form(
@@ -1496,20 +1563,20 @@ def _try_on_clothes_refiner(
     products: Tuple[ProductoVestua, ...],
     gender: str,
 ) -> Dict[str, str]:
-    categories = {
-        _virtual_try_on_category(product): product
-        for product in products
-    }
-    top_product = categories.get("upper_body") or categories.get("dresses")
-    bottom_product = categories.get("lower_body")
-    top_image = (
-        _prepare_rapidapi_image(
-            _download_catalog_image(CATALOG_IMAGES_BY_URL[top_product.url]),
-            "La prenda superior",
-        )
-        if top_product
-        else _upper_body_reference_image(person_image)
+    return _try_on_clothes_refiner_with_garments(
+        person_image,
+        coarse_image_url,
+        gender,
+        _prepare_rapidapi_garment_files(person_image, products),
     )
+
+
+def _try_on_clothes_refiner_with_garments(
+    person_image: bytes,
+    coarse_image_url: str,
+    gender: str,
+    garment_files: Dict[str, Tuple[str, bytes, str]],
+) -> Dict[str, str]:
     coarse_image = _prepare_rapidapi_image(
         _download_catalog_image(coarse_image_url),
         "El resultado preliminar",
@@ -1517,20 +1584,8 @@ def _try_on_clothes_refiner(
     files = {
         "coarse_image": ("coarse.jpg", coarse_image, "image/jpeg"),
         "person_image": ("person.jpg", person_image, "image/jpeg"),
-        "top_garment": ("top-garment.jpg", top_image, "image/jpeg"),
+        **garment_files,
     }
-    if bottom_product:
-        bottom_image_url = CATALOG_IMAGES_BY_URL.get(bottom_product.url)
-        if not bottom_image_url:
-            raise ValueError("La prenda inferior no tiene una imagen disponible.")
-        files["bottom_garment"] = (
-            "bottom-garment.jpg",
-            _prepare_rapidapi_image(
-                _download_catalog_image(bottom_image_url),
-                "La prenda inferior",
-            ),
-            "image/jpeg",
-        )
     body, boundary = _multipart_form(
         {"task_type": "async", "gender": gender},
         files,
@@ -2879,9 +2934,13 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
                 result = _try_on_diffusion(person_image, selected_products[0])
                 result["detail"] = "Resultado Probador (Try-On Diffusion)"
             elif provider == "refiner":
-                coarse_result = _rapidapi_try_on(
+                garment_files = _prepare_rapidapi_garment_files(
                     person_image,
                     selected_products,
+                )
+                coarse_result = _rapidapi_try_on_with_garments(
+                    person_image,
+                    garment_files,
                 )
                 coarse_image_url = coarse_result.get("result_image_url")
                 if not coarse_image_url:
@@ -2889,11 +2948,11 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
                         "Try on Clothes Pro no devolvió la imagen preliminar "
                         "requerida por Refiner."
                     )
-                result = _try_on_clothes_refiner(
+                result = _try_on_clothes_refiner_with_garments(
                     person_image,
                     coarse_image_url,
-                    selected_products,
                     gender,
+                    garment_files,
                 )
                 result["detail"] = "Resultado Probador (Try on Clothes Refiner)"
             else:

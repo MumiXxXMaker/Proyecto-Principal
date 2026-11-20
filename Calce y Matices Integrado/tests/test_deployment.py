@@ -132,7 +132,8 @@ class DeploymentTests(unittest.TestCase):
     def test_catalog_type_filter_groups_and_omits_excluded_types(self):
         page = renderizar_pagina({"view": "catalog"})
         type_filter_start = page.index(
-            '<label>Tipo de prenda<select data-catalog-type-filter>'
+            '<label class="catalog-filter-field"><span>Tipo</span>'
+            '<select data-catalog-type-filter>'
         )
         type_filter_end = page.index("</select>", type_filter_start)
         type_filter = page[type_filter_start:type_filter_end]
@@ -254,6 +255,15 @@ class DeploymentTests(unittest.TestCase):
                             b'{"error_code":0,"task_status":1}'
                         ),
                         _FakeResponse(
+                            b'{"error_code":0,"task_status":1}'
+                        ),
+                        _FakeResponse(
+                            b'{"error_code":0,"task_status":1}'
+                        ),
+                        _FakeResponse(
+                            b'{"error_code":0,"task_status":1}'
+                        ),
+                        _FakeResponse(
                             json.dumps(
                                 {
                                     "error_code": 0,
@@ -270,8 +280,11 @@ class DeploymentTests(unittest.TestCase):
 
         self.assertEqual(data["status"], "success")
         self.assertEqual(data["result_image_url"], result_image_url)
-        self.assertEqual(requests.call_count, 5)
-        sleep.assert_called_once_with(5)
+        self.assertEqual(requests.call_count, 8)
+        self.assertEqual(
+            [sleep_call.args for sleep_call in sleep.call_args_list],
+            [(1,), (2,), (2,), (5,)],
+        )
         self.assertEqual(
             requests.call_args_list[1][0][0].full_url,
             CATALOG_IMAGES_BY_URL[product.url],
@@ -299,7 +312,7 @@ class DeploymentTests(unittest.TestCase):
         )
         self.assertIn(
             "query-async-task-result?task_id=task-123",
-            requests.call_args_list[4][0][0].full_url,
+            requests.call_args_list[7][0][0].full_url,
         )
         self.assertEqual(
             dict((key.lower(), value) for key, value in rapidapi_request.header_items())[
@@ -915,7 +928,7 @@ class DeploymentTests(unittest.TestCase):
             "Resultado Probador (Try on Clothes Refiner)",
         )
         self.assertEqual(data["result_image_url"], refined_url)
-        self.assertEqual(downloads.call_count, 3)
+        self.assertEqual(downloads.call_count, 2)
         self.assertEqual(requests.call_count, 5)
         primary_request = requests.call_args_list[1][0][0]
         refiner_request = requests.call_args_list[3][0][0]

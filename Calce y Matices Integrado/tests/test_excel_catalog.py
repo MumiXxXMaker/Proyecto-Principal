@@ -326,6 +326,13 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("data-catalog-type-filter", catalog)
         self.assertIn("data-catalog-size-filter", catalog)
         self.assertIn('class="catalog-sidebar"', catalog)
+        self.assertIn('data-catalog-filters-dialog', catalog)
+        self.assertIn("data-catalog-open-filters", catalog)
+        self.assertIn("data-catalog-apply-filters", catalog)
+        self.assertIn("data-catalog-clear-filters", catalog)
+        self.assertIn('data-catalog-view="5"', catalog)
+        self.assertIn('data-catalog-view="3"', catalog)
+        self.assertIn('data-catalog-view="2"', catalog)
         self.assertIn('data-catalog-page-size="20"', catalog)
         self.assertIn('data-catalog-previous disabled', catalog)
         self.assertIn(
@@ -333,8 +340,8 @@ class ExcelCatalogTests(unittest.TestCase):
             catalog,
         )
         self.assertLess(
-            catalog.index('data-catalog-page aria-live="polite"'),
             catalog.index("data-catalog-result-count"),
+            catalog.index("data-catalog-items"),
         )
         self.assertNotIn("Productos e imágenes se consultan en las tiendas enlazadas", catalog)
         self.assertNotIn('data-catalog-card hidden', catalog)

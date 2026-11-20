@@ -1130,6 +1130,16 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const minPriceFilter = catalog.querySelector("[data-catalog-min-price]");
   const maxPriceFilter = catalog.querySelector("[data-catalog-max-price]");
   const resultCount = catalog.querySelector("[data-catalog-result-count]");
+  const heading = catalog.querySelector("[data-catalog-heading]");
+  const filtersDialog = catalog.querySelector("[data-catalog-filters-dialog]");
+  const openFiltersButton = catalog.querySelector("[data-catalog-open-filters]");
+  const closeFiltersButton = catalog.querySelector("[data-catalog-close-filters]");
+  const clearFiltersButton = catalog.querySelector("[data-catalog-clear-filters]");
+  const applyFiltersButton = catalog.querySelector("[data-catalog-apply-filters]");
+  const filterCount = catalog.querySelector("[data-catalog-filter-count]");
+  const viewCount = catalog.querySelector(".catalog-view-count");
+  const viewButtons = catalog.querySelectorAll("[data-catalog-view]");
+  const selectionBar = catalog.querySelector("[data-catalog-selection-bar]");
   const selectionStatus = catalog.querySelector("[data-catalog-selection-status]");
   const tryOnButton = catalog.querySelector("[data-catalog-try-on]");
   const pagination = catalog.querySelector("[data-catalog-pagination]");
@@ -1169,11 +1179,46 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
 
   const updateSelection = () => {
     const count = selectedCatalogGarments.size;
+    if (selectionBar) selectionBar.hidden = count === 0;
     selectionStatus.textContent = count
       ? `${count} ${count === 1 ? "prenda seleccionada" : "prendas seleccionadas"} para el Probador`
       : "Ninguna prenda seleccionada";
     tryOnButton.disabled = count === 0;
     tryOnButton.textContent = count ? "Probar" : "Selecciona prendas para probarte";
+  };
+
+  const updateFilterSummary = () => {
+    const activeFilters = [
+      typeFilter,
+      sizeFilter,
+      brandFilter,
+      minPriceFilter,
+      maxPriceFilter,
+    ].filter(filter => filter.value.trim()).length;
+    if (filterCount) filterCount.textContent = String(activeFilters);
+  };
+
+  const updateHeading = () => {
+    if (!heading) return;
+    const searchTerm = searchInput.value.trim();
+    heading.textContent = searchTerm
+      ? `Tus resultados de búsqueda para ${searchTerm}`
+      : "Catálogo completo de prendas";
+  };
+
+  const updateResultTotal = total => {
+    if (applyFiltersButton) {
+      applyFiltersButton.dataset.catalogTotal = String(total);
+      applyFiltersButton.textContent = `Mostrar ${total} productos`;
+    }
+    if (viewCount) viewCount.textContent = `${total} prendas`;
+  };
+
+  const setCatalogView = view => {
+    itemsContainer.dataset.view = view;
+    viewButtons.forEach(button => {
+      button.setAttribute("aria-pressed", String(button.dataset.catalogView === view));
+    });
   };
 
   const bindCard = item => {
@@ -1283,6 +1328,9 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       currentPage = data.page;
       catalog.dataset.catalogPageIndex = String(currentPage);
       resultCount.textContent = data.result_text;
+      updateResultTotal(data.total);
+      updateFilterSummary();
+      updateHeading();
       pageLabel.textContent = data.page_text;
       previousPageButton.disabled = currentPage === 0;
       nextPageButton.disabled = currentPage >= data.pages - 1;
@@ -1297,11 +1345,43 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   };
 
   sortSelect.addEventListener("change", () => loadPage(0));
-  typeFilter.addEventListener("change", () => loadPage(0));
-  sizeFilter.addEventListener("change", () => loadPage(0));
-  brandFilter.addEventListener("change", () => loadPage(0));
-  minPriceFilter.addEventListener("change", () => loadPage(0));
-  maxPriceFilter.addEventListener("change", () => loadPage(0));
+  [typeFilter, sizeFilter, brandFilter, minPriceFilter, maxPriceFilter].forEach(filter => {
+    filter.addEventListener("change", () => {
+      updateFilterSummary();
+      loadPage(0);
+    });
+  });
+  openFiltersButton?.addEventListener("click", () => {
+    filtersDialog?.showModal();
+    openFiltersButton.setAttribute("aria-expanded", "true");
+  });
+  closeFiltersButton?.addEventListener("click", () => filtersDialog?.close());
+  applyFiltersButton?.addEventListener("click", () => filtersDialog?.close());
+  clearFiltersButton?.addEventListener("click", () => {
+    [typeFilter, sizeFilter, brandFilter, minPriceFilter, maxPriceFilter].forEach(filter => {
+      filter.value = "";
+    });
+    updateFilterSummary();
+    loadPage(0);
+  });
+  filtersDialog?.addEventListener("close", () => {
+    openFiltersButton?.setAttribute("aria-expanded", "false");
+  });
+  filtersDialog?.addEventListener("click", event => {
+    if (event.target === filtersDialog) filtersDialog.close();
+  });
+  viewButtons.forEach(button => {
+    button.addEventListener("click", () => setCatalogView(button.dataset.catalogView));
+  });
+  updateFilterSummary();
+  if (applyFiltersButton) {
+    updateResultTotal(Number(applyFiltersButton.dataset.catalogTotal) || 0);
+  }
+  viewButtons.forEach(button => {
+    if (button.getAttribute("aria-pressed") === "true") {
+      setCatalogView(button.dataset.catalogView);
+    }
+  });
   searchForm.addEventListener("submit", event => {
     if (!catalogViewActive) return;
     event.preventDefault();
@@ -1324,6 +1404,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   });
   if (catalogViewActive) {
     searchInput.addEventListener("input", () => {
+      updateHeading();
       window.clearTimeout(searchTimer);
       searchTimer = window.setTimeout(() => loadPage(0), 250);
     });
