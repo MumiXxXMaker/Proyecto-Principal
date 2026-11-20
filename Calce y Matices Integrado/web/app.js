@@ -112,6 +112,25 @@ if (savedScrollPosition !== null) {
   }
 }
 
+const syncCatalogLinkMeasurements = () => {
+  const measurementValues = Array.from(
+    document.querySelectorAll('[data-style-wizard-form] .measurement-input[name]'),
+    field => [field.name, field.value.trim()],
+  );
+  document.querySelectorAll('a[href]').forEach(link => {
+    const url = new URL(link.href, window.location.href);
+    if (
+      url.origin !== window.location.origin
+      || url.searchParams.get("view") !== "catalog"
+    ) return;
+    measurementValues.forEach(([name, value]) => {
+      if (value) url.searchParams.set(name, value);
+      else url.searchParams.delete(name);
+    });
+    link.href = `${url.pathname}${url.search}${url.hash}`;
+  });
+};
+
 document.querySelectorAll('form[action="/"]').forEach(form => {
   const rememberCheckbox = form.querySelector("#remember-me");
   const rememberStatus = form.querySelector("#remember-status");
@@ -213,6 +232,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
 
   measurementFields.forEach(field => {
     field.addEventListener("input", () => {
+      syncCatalogLinkMeasurements();
       if (!rememberCheckbox.checked) return;
       try {
         saveMeasurements();
@@ -254,6 +274,9 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const profileAvatar = document.querySelector("[data-profile-avatar]");
     const profileAvatarPreview = document.querySelector("[data-profile-avatar-preview]");
     const profileAvatarInput = document.getElementById("profile-avatar-input");
+    const removeProfileAvatarButton = document.querySelector(
+      "[data-remove-profile-avatar]",
+    );
     const profileEmailInput = document.getElementById("profile-email");
     const profileFirstNameInput = document.getElementById("profile-first-name");
     const profileLastNameInput = document.getElementById("profile-last-name");
@@ -289,6 +312,19 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const profileAvatarPath = user => `${user.id}/avatar`;
     let profileAvatarPathValue;
     let profileAvatarUrl;
+    const renderProfileAvatar = source => {
+      [profileAvatar, profileAvatarPreview].forEach(image => {
+        image.hidden = !source;
+        if (source) image.src = source;
+        else image.removeAttribute("src");
+      });
+      profileAvatarFallbacks.forEach(fallback => {
+        fallback.hidden = Boolean(source);
+      });
+      if (removeProfileAvatarButton) {
+        removeProfileAvatarButton.hidden = !source;
+      }
+    };
     let savedProfileFirstName = "";
     let savedProfileLastName = "";
     const profileFields = [
@@ -366,12 +402,10 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         profileAvatarPathValue = null;
         if (profileAvatarUrl) URL.revokeObjectURL(profileAvatarUrl);
         profileAvatarUrl = null;
+        renderProfileAvatar(null);
         profileFields.forEach(field => { field.value = ""; });
         if (profileEmailInput) profileEmailInput.value = "";
         profileName.textContent = "Mi Perfil";
-        profileAvatar.hidden = true;
-        profileAvatarPreview.hidden = true;
-        profileAvatarFallbacks.forEach(fallback => { fallback.hidden = false; });
       }
       accountLinks.forEach(link => {
         link.hidden = Boolean(user);
@@ -566,9 +600,9 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     };
     const loadProfileAvatar = async (user, path) => {
       if (!path) {
-        profileAvatar.hidden = true;
-        profileAvatarPreview.hidden = true;
-        profileAvatarFallbacks.forEach(fallback => { fallback.hidden = false; });
+        if (profileAvatarUrl) URL.revokeObjectURL(profileAvatarUrl);
+        profileAvatarUrl = null;
+        renderProfileAvatar(null);
         return;
       }
       if (path !== profileAvatarPath(user)) {
@@ -580,11 +614,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       if (error) throw error;
       if (profileAvatarUrl) URL.revokeObjectURL(profileAvatarUrl);
       profileAvatarUrl = data.signedUrl;
-      [profileAvatar, profileAvatarPreview].forEach(image => {
-        image.src = profileAvatarUrl;
-        image.hidden = false;
-      });
-      profileAvatarFallbacks.forEach(fallback => { fallback.hidden = true; });
+      renderProfileAvatar(profileAvatarUrl);
     };
     const uploadProfileAvatar = async (user, file) => {
       const path = profileAvatarPath(user);
@@ -615,6 +645,8 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         throw error;
       }
       if (!data) {
+        profileAvatarPathValue = null;
+        await loadProfileAvatar(user, null);
         profileFirstNameInput.value = user.user_metadata?.first_name || "";
         profileLastNameInput.value = user.user_metadata?.last_name || "";
         savedProfileFirstName = profileFirstNameInput.value;
@@ -942,6 +974,50 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         console.error("No se pudo guardar la foto de perfil.", error);
       }
     });
+    removeProfileAvatarButton?.addEventListener("click", async () => {
+      const user = signedInUser;
+      const path = profileAvatarPathValue;
+      if (!user || !supabaseClient || !path) return;
+      if (path !== profileAvatarPath(user)) {
+        profileDataStatus.textContent = "No se pudo quitar la foto de perfil.";
+        console.error("La ruta de la foto de perfil no es válida.");
+        return;
+      }
+      if (!window.confirm("¿Quieres quitar tu foto de perfil?")) return;
+
+      removeProfileAvatarButton.disabled = true;
+      profileDataStatus.textContent = "Quitando foto de perfil…";
+      try {
+        const { error } = await supabaseClient
+          .from("user_profiles")
+          .update({ avatar_path: null })
+          .eq("user_id", user.id);
+        if (error) throw error;
+      } catch (error) {
+        profileDataStatus.textContent = `No se pudo quitar la foto: ${error.message}`;
+        console.error("No se pudo quitar la foto del perfil.", error);
+        removeProfileAvatarButton.disabled = false;
+        return;
+      }
+
+      profileAvatarPathValue = null;
+      await loadProfileAvatar(user, null);
+      try {
+        const { error } = await supabaseClient.storage
+          .from(profilePhotoBucket)
+          .remove([path]);
+        if (error) throw error;
+        profileDataStatus.textContent = "Foto de perfil eliminada.";
+      } catch (error) {
+        profileDataStatus.textContent = (
+          "La foto se quitó del perfil, pero no se pudo eliminar su archivo "
+          + `del almacenamiento: ${error.message}`
+        );
+        console.error("No se pudo eliminar la foto del perfil en Supabase Storage.", error);
+      } finally {
+        removeProfileAvatarButton.disabled = false;
+      }
+    });
     window.addEventListener("matices:photo-selected", event => {
       latestSelectedPhoto = event.detail?.file;
       if (rememberPhotoInput.checked && !signedInUser) {
@@ -1084,6 +1160,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     setAuthMode(authMode);
   }
 });
+syncCatalogLinkMeasurements();
 
 document.querySelectorAll("[data-carousel]").forEach(carousel => {
   const cards = Array.from(carousel.querySelectorAll("[data-carousel-card]"));
@@ -1148,15 +1225,9 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const pageLabel = catalog.querySelector("[data-catalog-page]");
   const catalogPagePanel = catalog.closest('[data-page-panel="catalog"]');
   const catalogViewActive = Boolean(catalogPagePanel && !catalogPagePanel.hidden);
-  const infoLink = document.getElementById("info-link");
-  if (searchForm) {
-    if (catalogViewActive) {
-      searchForm.classList.add("catalog-search-form--catalog");
-      catalog.querySelector(".catalog-main")?.prepend(searchForm);
-    } else if (infoLink) {
-      searchForm.classList.add("catalog-search-form--nav");
-      infoLink.after(searchForm);
-    }
+  if (searchForm && catalogViewActive) {
+    searchForm.classList.add("catalog-search-form--catalog");
+    catalog.querySelector(".catalog-main")?.prepend(searchForm);
   }
 
   if (

@@ -130,7 +130,6 @@ class TryOnProvidersError(Exception):
 
 
 REPOSITORY = RepositorioExcelPrendas(MATRIX_PATH)
-VARIABLES = REPOSITORY.cargar_variables()
 STANDARD_SIZES = RepositorioTallasEstandar(SIZE_CHART_PATH).cargar()
 VESTUA_IMAGES_PATH = ROOT / "data" / "vestua_images.json"
 with VESTUA_IMAGES_PATH.open(encoding="utf-8") as image_file:
@@ -376,7 +375,6 @@ CATEGORY_GROUPS = {
     "__top__": ("Blusa", "Polera", "Top Deportivo", "Blazer", "Vestido"),
     "__bottom__": ("Pantalon", "Pantalón", "Jeans"),
 }
-IMPACT_PRIORITY = {"Muy Alto": 0, "Alto": 1, "Medio": 2, "Bajo": 3}
 MEASUREMENT_HELP = {
     "bust": (
         "Mide alrededor de la parte más amplia del pecho, manteniendo la cinta "
@@ -2264,20 +2262,6 @@ def _fit_information_content() -> str:
         f"<td>{escape(talla.cadera)}</td></tr>"
         for talla in STANDARD_SIZES
     )
-    variables = "".join(
-        f"""<article class="variable">
-          <div class="variable-top"><strong>{escape(name)}</strong>
-            <span class="impact {escape(impact.lower().replace(' ', '-'))}">{escape(impact)}</span></div>
-          <span class="variable-category">{escape(category)}</span>
-          <p>{escape(description)}</p>
-        </article>"""
-        for category, name, description, impact in sorted(
-            VARIABLES,
-            key=lambda variable: IMPACT_PRIORITY.get(
-                variable[3], len(IMPACT_PRIORITY)
-            ),
-        )
-    )
     return f"""<div class="fit-info-page">
       <div class="fit-info-hero">
         <span class="eyebrow">Calce · metodología</span>
@@ -2318,17 +2302,6 @@ def _fit_information_content() -> str:
           <li>La tolerancia propia de cada referencia afecta el diagnóstico, no el puntaje.</li></ul>
         <h2>Cómo interpretar el diagnóstico</h2>
         <p>“Podría quedarte bien” indica que las medidas están dentro del rango. Los estados de límite consideran la tolerancia de la referencia; si falta cintura o cadera, la revisión será parcial.</p>
-      </section>
-      <section class="section">
-        <details class="variable-details">
-          <summary class="section-title variable-details-summary">
-            <div class="eyebrow">Detrás de cada recomendación</div>
-            <span class="variable-details-indicator" aria-hidden="true"></span>
-          </summary>
-          <div class="catalog-panel">
-            <div class="variable-grid">{variables}</div>
-          </div>
-        </details>
       </section>
     </div>"""
 
