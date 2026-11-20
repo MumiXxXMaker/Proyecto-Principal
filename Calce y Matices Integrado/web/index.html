@@ -8,7 +8,7 @@
   <meta name="supabase-publishable-key" content="{supabase_publishable_key}">
   <title>Calce Wardrobe</title>
   <link rel="icon" type="image/png" href="/assets/calce-isotipo.png">
-  <link rel="stylesheet" href="/styles.css?v=catalog-visual-redesign-17">
+  <link rel="stylesheet" href="/styles.css?v=profile-avatar-remove-21">
 </head>
 <body>
   <header><div class="wrap nav">
@@ -21,8 +21,8 @@
     </a>
     <nav class="page-tabs" aria-label="Secciones principales">
       <a id="storefront-link" href="{storefront_url}"{storefront_link_current}>Home</a>
-      <a id="home-link" href="{home_tab_url}"{home_link_current}>Tu Calce</a>
       <a id="catalog-link" href="{catalog_tab_url}"{catalog_link_current}>Catálogo</a>
+      <a id="home-link" href="{home_tab_url}"{home_link_current}>Tu Calce</a>
       <a id="try-on-link" href="{try_on_tab_url}"{try_on_link_current}>Probador</a>
       <a id="info-link" href="{info_tab_url}"{info_link_current}>Info</a>
     </nav>
@@ -35,7 +35,7 @@
         <summary aria-label="Abrir menú de perfil">
           <img class="profile-menu-avatar profile-menu-avatar-image"
             src="/assets/profile-avatar-default.jpeg?v=2"
-            alt="" aria-hidden="true">
+            data-profile-avatar-fallback alt="" aria-hidden="true">
           <img class="profile-menu-avatar profile-menu-avatar-image" data-profile-avatar
             alt="" hidden>
           <span data-profile-name>Mi Perfil</span>
@@ -272,19 +272,36 @@
         <section id="profile-account-data" class="profile-card"
           aria-labelledby="profile-account-title">
           <header class="profile-page-heading">
-            <span class="eyebrow">Mi Perfil</span>
-            <h1 id="profile-account-title">Datos de Cuenta</h1>
+            <div class="profile-page-title">
+              <span class="eyebrow">Mi Perfil</span>
+              <h1 id="profile-account-title">Datos de Cuenta</h1>
+            </div>
+            <div class="profile-avatar-editor">
+              <label class="profile-avatar-button" for="profile-avatar-input"
+                title="Cambiar foto de perfil">
+                <img class="profile-avatar-fallback" data-profile-avatar-fallback
+                  src="/assets/profile-avatar-default.jpeg?v=2" alt="" aria-hidden="true">
+                <img data-profile-avatar-preview alt="" hidden>
+                <span class="profile-avatar-camera-badge" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M4 7h3l1.5-2h7L17 7h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+                </span>
+                <span class="profile-avatar-edit-overlay" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M4 7h3l1.5-2h7L17 7h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+                  <span>Cambiar foto</span>
+                </span>
+                <span class="visually-hidden">Cambiar foto de perfil</span>
+                <input id="profile-avatar-input" type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif,image/avif">
+              </label>
+              <button class="profile-avatar-remove" type="button"
+                data-remove-profile-avatar hidden
+                aria-label="Quitar foto de perfil" title="Quitar foto de perfil">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="m7 7 10 10M17 7 7 17"/>
+                </svg>
+              </button>
+            </div>
           </header>
-          <div class="profile-avatar-editor">
-            <img class="profile-avatar-fallback" data-profile-avatar-fallback
-              src="/assets/profile-avatar-default.jpeg?v=2" alt="" aria-hidden="true">
-            <img data-profile-avatar-preview alt="Foto de perfil" hidden>
-            <label class="matices-button profile-avatar-button" for="profile-avatar-input">
-              Cambiar foto de perfil
-              <input id="profile-avatar-input" type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif,image/avif">
-            </label>
-          </div>
           <div class="profile-form-grid">
             <label for="profile-email">Correo electrónico
               <input id="profile-email" type="email" autocomplete="email" disabled>
@@ -329,6 +346,6 @@
       </div>
     </section>
   </div></main>
-  <script src="/app.js?v=catalog-visual-redesign-17" defer></script>
+  <script src="/app.js?v=catalog-search-only-20" defer></script>
 </body>
 </html>

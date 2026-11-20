@@ -253,7 +253,7 @@ class ExcelCatalogTests(unittest.TestCase):
                     result_without_irrelevant_measures.puntuacion,
                 )
 
-    def test_page_renders_product_and_variable_data_from_excel(self):
+    def test_page_renders_product_data_from_excel(self):
         page = renderizar_pagina(
             {"brand": "Zara", "category": "Blusa", "waist": "70", "hip": "96"}
         )
@@ -267,7 +267,6 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertNotIn("Ver recomendaciones", page)
         self.assertIn("Zara · Zara Woman", page)
-        self.assertIn("Slim-Regular-Oversize", page)
         self.assertIn('data-carousel', page)
         self.assertIn('data-recommended', page)
         self.assertIn('data-previous', page)
@@ -509,6 +508,27 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertIn('data-catalog-bust="90.0 cm"', cards["cards"])
 
+    def test_catalog_navigation_syncs_current_wizard_measurements(self):
+        app_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("const syncCatalogLinkMeasurements = () =>", app_script)
+        self.assertIn('url.searchParams.set(name, value)', app_script)
+        self.assertIn('url.searchParams.delete(name)', app_script)
+        self.assertIn(
+            'field.addEventListener("input", () => {\n'
+            '      syncCatalogLinkMeasurements();',
+            app_script,
+        )
+
+    def test_catalog_search_stays_inside_catalog_tab(self):
+        app_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("if (searchForm && catalogViewActive)", app_script)
+        self.assertIn(
+            'catalog.querySelector(".catalog-main")?.prepend(searchForm)',
+            app_script,
+        )
+        self.assertNotIn("catalog-search-form--nav", app_script)
+        self.assertNotIn("infoLink.after(searchForm)", app_script)
+
     def test_photo_step_offers_device_camera_and_image_picker(self):
         page = renderizar_pagina({})
         photo_step = page.split(
@@ -563,17 +583,12 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertNotIn('<dialog id="style-wizard"', page)
         self.assertNotIn("data-wizard-reopen", page)
 
-    def test_fit_details_section_is_in_info_not_home(self):
+    def test_fit_details_section_is_removed(self):
         page = renderizar_pagina({})
-        home_page, info_page = page.split('<section id="info-panel"', 1)
-        details_section = info_page.split(
-            '<details class="variable-details">', 1
-        )[1].split("</details>", 1)[0]
 
-        self.assertNotIn("Detrás de cada recomendación", home_page)
-        self.assertIn("Detrás de cada recomendación", details_section)
-        self.assertIn('class="variable-grid"', details_section)
-        self.assertNotIn("<details class=\"variable-details\" open>", page)
+        self.assertNotIn("Detrás de cada recomendación", page)
+        self.assertNotIn('class="variable-details"', page)
+        self.assertNotIn('class="variable-grid"', page)
 
     def test_wizard_measurement_step_precedes_summary_step(self):
         page = renderizar_pagina(
@@ -703,7 +718,7 @@ class ExcelCatalogTests(unittest.TestCase):
             'src="/assets/profile-avatar-default.jpeg?v=2"',
             profile_menu_summary,
         )
-        self.assertNotIn("data-profile-avatar-fallback", profile_menu_summary)
+        self.assertIn("data-profile-avatar-fallback", profile_menu_summary)
         self.assertIn('<p data-profile-greeting hidden></p>', profile_menu)
         self.assertLess(
             profile_menu.index("data-profile-greeting"),
@@ -719,6 +734,23 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('id="supabase-last-name"', page)
         self.assertIn('id="profile-phone"', page)
         self.assertIn('id="profile-avatar-input"', page)
+        profile_heading = page.split(
+            '<header class="profile-page-heading">', 1
+        )[1].split("</header>", 1)[0]
+        self.assertIn('<div class="profile-avatar-editor">', profile_heading)
+        avatar_editor = page.split(
+            '<div class="profile-avatar-editor">', 1
+        )[1].split("</div>", 1)[0]
+        self.assertIn(
+            '<label class="profile-avatar-button" for="profile-avatar-input"',
+            avatar_editor,
+        )
+        self.assertIn("profile-avatar-camera-badge", avatar_editor)
+        self.assertIn(
+            '<span class="visually-hidden">Cambiar foto de perfil</span>',
+            avatar_editor,
+        )
+        self.assertIn("data-remove-profile-avatar hidden", avatar_editor)
         self.assertIn('id="profile-payment"', page)
         self.assertIn("La gestión de tarjetas aún no está habilitada.", page)
         self.assertIn('data-supabase-sign-out hidden>Cerrar sesión</button>', page)
@@ -732,6 +764,12 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("storage: authStorage", app_script)
         self.assertIn("window.localStorage", app_script)
         self.assertIn("window.sessionStorage", app_script)
+        self.assertIn(
+            'if (!window.confirm("¿Quieres quitar tu foto de perfil?")) return;',
+            app_script,
+        )
+        self.assertIn(".update({ avatar_path: null })", app_script)
+        self.assertIn(".remove([path])", app_script)
         self.assertIn("rememberSessionRow.hidden = creatingAccount", app_script)
         self.assertIn("first_name: values.firstName", app_script)
         self.assertIn('return_view=${authReturnView}', app_script)
@@ -908,6 +946,10 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("se guarda temporalmente en este navegador por hasta una hora", home_page)
         self.assertNotIn("aiuta", home_page.lower())
         self.assertIn('<nav class="page-tabs" aria-label="Secciones principales">', home_page)
+        nav = home_page.split(
+            '<nav class="page-tabs" aria-label="Secciones principales">', 1
+        )[1].split("</nav>", 1)[0]
+        self.assertLess(nav.index(">Catálogo</a>"), nav.index(">Tu Calce</a>"))
         self.assertIn('href="/?view=home" aria-current="page">Tu Calce</a>', home_page)
         self.assertIn('href="/?view=storefront" aria-current="page">Home</a>', storefront_page)
         self.assertIn('src="/assets/calce-isotipo.png"', storefront_page)
@@ -1182,15 +1224,6 @@ class ExcelCatalogTests(unittest.TestCase):
             )
         )
 
-    def test_fit_information_factors_remain_ordered_by_declared_importance(self):
-        page = renderizar_pagina({})
-        impacts = re.findall(r'class="impact ([^"]+)"', page)
-
-        self.assertEqual(
-            impacts,
-            ["muy-alto"] * 4 + ["alto"] * 6 + ["medio"] * 4,
-        )
-
     def test_brand_and_category_summary_reports_all_closest_ties(self):
         profile = PerfilMedidas(busto=85, cintura=67, cadera=93)
         preference = "regular"
@@ -1410,10 +1443,7 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("<strong>S (EU 36/38) (EE.UU. 4/6)</strong>", page)
         self.assertNotIn("Tabla Estándar de Tallas", page)
         self.assertNotIn('class="size-chart"', page)
-        self.assertIn(
-            '<div class="eyebrow">Detrás de cada recomendación</div>',
-            page.split('<section id="info-panel"', 1)[1],
-        )
+        self.assertNotIn("Detrás de cada recomendación", page)
         self.assertNotIn("Medidas corporales en centímetros", page)
         self.assertNotIn("El archivo adjunto no contiene tablas oficiales por marca", page)
         self.assertNotIn("Esta referencia estándar no garantiza equivalencia con una marca", page)
