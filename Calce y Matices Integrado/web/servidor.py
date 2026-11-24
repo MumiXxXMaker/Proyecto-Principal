@@ -130,6 +130,7 @@ class TryOnProvidersError(Exception):
 
 
 REPOSITORY = RepositorioExcelPrendas(MATRIX_PATH)
+VARIABLES = REPOSITORY.cargar_variables()
 STANDARD_SIZES = RepositorioTallasEstandar(SIZE_CHART_PATH).cargar()
 VESTUA_IMAGES_PATH = ROOT / "data" / "vestua_images.json"
 with VESTUA_IMAGES_PATH.open(encoding="utf-8") as image_file:
@@ -165,6 +166,28 @@ WOMENSWEAR_IMAGES_BY_URL = {
 }
 WOMENSWEAR_STORES_BY_URL = {
     item["url"]: item["store"] for item in WOMENSWEAR_DATA["products"]
+}
+CATALOG_SIZES_BY_URL = {
+    item["url"]: tuple(
+        size.strip()
+        for size in item.get("available_sizes", [])
+        if isinstance(size, str) and size.strip()
+    )
+    for item in WOMENSWEAR_DATA["products"]
+    if item["store"] == "Paris"
+}
+CATALOG_OUT_OF_STOCK_SIZES_BY_URL = {
+    item["url"]: frozenset(
+        size.strip().casefold()
+        for size in (
+            item.get("out_of_stock_sizes")
+            if isinstance(item.get("out_of_stock_sizes"), list)
+            else []
+        )
+        if isinstance(size, str) and size.strip()
+    )
+    for item in WOMENSWEAR_DATA["products"]
+    if item["store"] == "Paris"
 }
 CATALOG_IMAGES_BY_URL = {
     **{
@@ -270,6 +293,22 @@ CATALOG_SEARCH_TEXT_BY_URL = {
     )
     for product in CATALOG_PRODUCTS
 }
+CATALOG_TYPES = tuple(sorted(
+    {
+        product_type
+        for product_type in {product.tipo_prenda for product in CATALOG_PRODUCTS}
+        if _normalize_search_text(product_type) not in EXCLUDED_CATALOG_FILTER_TYPES
+    },
+    key=str.casefold,
+))
+CATALOG_SIZES = tuple(sorted(
+    {product.talla or "No indicada" for product in CATALOG_PRODUCTS},
+    key=str.casefold,
+))
+CATALOG_BRANDS = tuple(sorted(
+    {product.marca or "No indicada" for product in CATALOG_PRODUCTS},
+    key=str.casefold,
+))
 WOMENSWEAR_STORES = (
     ("Paris", "https://www.paris.cl/mujer/"),
     ("Tricot", "https://www.tricot.cl/mujer"),
@@ -375,6 +414,7 @@ CATEGORY_GROUPS = {
     "__top__": ("Blusa", "Polera", "Top Deportivo", "Blazer", "Vestido"),
     "__bottom__": ("Pantalon", "Pantalón", "Jeans"),
 }
+IMPACT_PRIORITY = {"Muy Alto": 0, "Alto": 1, "Medio": 2, "Bajo": 3}
 MEASUREMENT_HELP = {
     "bust": (
         "Mide alrededor de la parte más amplia del pecho, manteniendo la cinta "
@@ -573,6 +613,11 @@ def _catalog_product_card(
     perfil: PerfilMedidas,
 ) -> str:
     store = CATALOG_STORES_BY_URL.get(product.url, "Vestua")
+    available_sizes = CATALOG_SIZES_BY_URL.get(product.url, ())
+    out_of_stock_sizes = CATALOG_OUT_OF_STOCK_SIZES_BY_URL.get(
+        product.url,
+        frozenset(),
+    )
     image_url = CATALOG_IMAGES_BY_URL.get(product.url, "")
     price_value = "" if product.precio_clp is None else str(product.precio_clp)
     image = (
@@ -606,6 +651,50 @@ def _catalog_product_card(
         if result and result.diagnostico.clase_css
         else "partial"
     )
+    def render_size_option(size: str) -> str:
+        out_of_stock = size.casefold() in out_of_stock_sizes
+        attributes = ' disabled class="catalog-size-unavailable"' if out_of_stock else ""
+        label = f"{size} — Sin stock" if out_of_stock else size
+        return (
+            f'<option value="{escape(size, quote=True)}"{attributes}>'
+            f'{escape(label)}</option>'
+        )
+
+    size_field = (
+        '<label class="catalog-purchase-field"><span>Talla a llevar</span>'
+        '<select data-catalog-size-choice required>'
+        '<option value="" selected disabled>Selecciona una talla</option>'
+        + "".join(
+            render_size_option(size) for size in available_sizes
+        )
+        + '</select></label>'
+        if store == "Paris" and available_sizes
+        else (
+            '<label class="catalog-purchase-field"><span>Talla a llevar</span>'
+            '<input type="text" maxlength="32" autocomplete="off" placeholder="Ej.: M" '
+            'data-catalog-size-choice required></label>'
+        )
+    )
+    purchase_controls = (
+        '<div class="catalog-purchase-controls">'
+        '<label class="catalog-purchase-field"><span>Cantidad</span>'
+        '<input type="number" min="1" step="1" value="1" inputmode="numeric" '
+        'data-catalog-quantity></label>'
+        f'{size_field}'
+        '</div>'
+        if store != "Vestua"
+        else ""
+    )
+    published_size = (
+        f"Talla publicada: {product.talla or 'No indicada'}"
+        if store != "Paris"
+        else ""
+    )
+    published_size_markup = (
+        f'<span class="catalog-product-size">{escape(published_size)}</span>'
+        if published_size
+        else ""
+    )
     return f"""<article class="catalog-item" data-catalog-card
       data-catalog-id="{escape(product.id, quote=True)}"
       data-catalog-size="{escape(product.talla or 'No indicada', quote=True)}"
@@ -619,21 +708,43 @@ def _catalog_product_card(
       data-catalog-index="{indice}" data-catalog-type="{escape(product.tipo_prenda, quote=True)}"
       data-catalog-try-on-category="{_virtual_try_on_category(product)}"
       data-catalog-searchable="{escape((store + ' ' + product.titulo + ' ' + product.marca + ' ' + product.categorias_catalogo).casefold(), quote=True)}">
-      <label class="catalog-select">
-        <input type="checkbox" data-catalog-select
-          aria-label="Seleccionar {escape(product.titulo, quote=True)} para el Probador">
-        <span>Seleccionar</span>
-      </label>
-      <span class="catalog-fit-badge {escape(fit_badge_class, quote=True)}"
-        title="{escape(fit_label, quote=True)}">{escape(fit_badge_label)}</span>
-      <a class="catalog-product-link" href="{escape(product.url, quote=True)}"
-        target="_blank" rel="noopener noreferrer">{image}</a>
+      <div class="catalog-product-media">
+        <a class="catalog-product-link" href="{escape(product.url, quote=True)}"
+          target="_blank" rel="noopener noreferrer">{image}</a>
+        <button class="catalog-favorite-toggle" type="button"
+          data-favorite-toggle data-product-title="{escape(product.titulo, quote=True)}"
+          aria-label="Agregar {escape(product.titulo, quote=True)} a Favoritos"
+          aria-pressed="false" title="Agregar a Favoritos">
+          <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+            <path d="M20.8 4.6a5.6 5.6 0 0 0-7.9 0L12 5.5l-.9-.9a5.6 5.6 0 0 0-7.9 7.9L12 21l8.8-8.5a5.6 5.6 0 0 0 0-7.9z"/>
+          </svg>
+          <span class="visually-hidden">Agregar a Favoritos</span>
+        </button>
+      </div>
+      <div class="catalog-card-selection-row">
+        <label class="catalog-select">
+          <input type="checkbox" data-catalog-select
+            aria-label="Seleccionar {escape(product.titulo, quote=True)} para el Probador">
+          <span>Seleccionar</span>
+        </label>
+        <span class="catalog-fit-badge {escape(fit_badge_class, quote=True)}">{escape(fit_badge_label)}</span>
+      </div>
       <div class="catalog-item-info">
         <span class="catalog-brand">{escape(store)} · {escape(product.marca)} · {escape(product.tipo_prenda)}</span>
         <h3>{escape(product.titulo)}</h3>
-        <span class="catalog-product-size">Talla publicada: {escape(product.talla or "No indicada")}</span>
+        {published_size_markup}
         <strong class="catalog-price">{_format_price(product.precio_clp)}</strong>
-        <span class="catalog-fit">{escape(fit_label)}</span>
+        {purchase_controls}
+        <button class="catalog-cart-add" type="button" data-cart-add
+          aria-label="Añadir {escape(product.titulo, quote=True)} al carrito"
+          title="Añadir al carrito">
+          <span class="catalog-cart-add-label">Añadir al carrito</span>
+          <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+            <path d="M3 4h2l2.2 11.1a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 1.9-1.4L22 9H7"/>
+            <circle cx="10" cy="20" r="1.25"/>
+            <circle cx="18" cy="20" r="1.25"/>
+          </svg>
+        </button>
         <a class="catalog-buy-link" href="{escape(product.url, quote=True)}"
           target="_blank" rel="noopener noreferrer">Ver ficha en {escape(store)}</a>
       </div>
@@ -690,7 +801,9 @@ def _garment_catalog(
         '<div class="catalog-heading"><div>'
         f'<h2 id="garment-catalog-title" data-catalog-heading>{heading}</h2>'
         '<p class="catalog-result-count" data-catalog-result-count '
-        f'aria-live="polite">{escape(catalog_data["result_text"])}</p></div>'
+        f'aria-live="polite">{escape(catalog_data["result_text"])}</p>'
+        '<p class="catalog-favorite-status" data-catalog-favorite-status '
+        'role="status" aria-live="polite"></p></div>'
         '<div class="catalog-toolbar-actions">'
         '<button class="catalog-filter-trigger" type="button" '
         'data-catalog-open-filters aria-haspopup="dialog" '
@@ -767,6 +880,35 @@ def _garment_catalog(
         '<span data-catalog-selection-status aria-live="polite">Ninguna prenda seleccionada</span>'
         '<button class="catalog-try-on-button" type="button" data-catalog-try-on '
         'disabled>Selecciona prendas para probarte</button></div>'
+        '<dialog class="catalog-paris-size-dialog" data-catalog-paris-size-dialog '
+        'aria-labelledby="catalog-paris-size-title">'
+        '<div class="catalog-paris-size-content">'
+        '<header class="catalog-paris-size-header"><div>'
+        '<h2 id="catalog-paris-size-title">¿Qué talla desea llevarse?</h2>'
+        '</div>'
+        '<button class="catalog-paris-size-close" type="button" '
+        'data-catalog-paris-size-close aria-label="Cerrar">×</button></header>'
+        '<label class="catalog-paris-size-field" '
+        'data-catalog-paris-size-select-field hidden>'
+        '<span>Talla para probarte</span>'
+        '<select data-catalog-paris-size-select required>'
+        '<option value="" selected disabled>Selecciona una talla</option>'
+        '</select></label>'
+        '<label class="catalog-paris-size-field" '
+        'data-catalog-paris-size-text-field hidden>'
+        '<span>Talla para probarte</span>'
+        '<input type="text" maxlength="32" autocomplete="off" '
+        'placeholder="Ej.: M" data-catalog-paris-size-text required>'
+        '</label>'
+        '<p class="catalog-paris-size-status" data-catalog-paris-size-status '
+        'role="status" aria-live="polite"></p>'
+        '<footer class="catalog-paris-size-actions">'
+        '<button class="catalog-paris-size-cancel" type="button" '
+        'data-catalog-paris-size-cancel>Cancelar</button>'
+        '<button class="catalog-paris-size-confirm" type="button" '
+        'data-catalog-paris-size-confirm disabled>Confirmar talla</button>'
+        '</footer>'
+        '</div></dialog>'
         '</div></div></section>'
     )
 
@@ -811,6 +953,14 @@ def _virtual_try_on_panel() -> str:
         '<div class="try-on-product-options" '
         'data-vton-product-options="lower_body"></div>'
         '</section>'
+        '<section class="try-on-product-group" '
+        'data-vton-product-group="unsupported" hidden '
+        'aria-labelledby="vton-unsupported-products-label">'
+        '<h3 id="vton-unsupported-products-label">'
+        'No disponibles para prueba virtual</h3>'
+        '<div class="try-on-product-options" '
+        'data-vton-product-options="unsupported"></div>'
+        '</section>'
         '</div>'
         '<p class="try-on-selection-hint">Puedes combinar una prenda '
         'superior y una inferior.</p>'
@@ -842,8 +992,50 @@ def _virtual_try_on_panel() -> str:
         '<img data-vton-tooltip-image alt="">'
         '<span data-vton-tooltip-title></span>'
         '</div>'
+        '<div class="try-on-actions">'
         '<button class="matices-button matices-button-primary" type="button" '
         'data-vton-generate disabled>Probar</button>'
+        '</div>'
+        '<a class="matices-button matices-button-primary try-on-go-cart" '
+        'href="/?view=cart" data-vton-open-cart-choice aria-haspopup="dialog" '
+        'aria-disabled="true" tabindex="-1">'
+        'Ir a Carrito</a>'
+        '<dialog class="try-on-cart-choice-dialog" data-vton-cart-choice-dialog '
+        'aria-labelledby="vton-cart-choice-title" '
+        'aria-describedby="vton-cart-choice-help">'
+        '<div class="try-on-cart-choice-content">'
+        '<header class="try-on-cart-choice-header">'
+        '<div><span class="eyebrow">Tu selección</span>'
+        '<h2 id="vton-cart-choice-title">¿Qué desea llevar?</h2>'
+        '<p id="vton-cart-choice-help">Selecciona las prendas que quieres '
+        'agregar al carrito. Puedes desmarcar las que prefieres dejar fuera.</p>'
+        '</div>'
+        '<button class="try-on-cart-choice-close" type="button" '
+        'data-vton-cart-choice-close aria-label="Cerrar">×</button>'
+        '</header>'
+        '<div class="try-on-cart-choice-list" data-vton-cart-choice-list '
+        'aria-label="Prendas para agregar al carrito"></div>'
+        '<p class="try-on-cart-choice-empty" data-vton-cart-choice-empty hidden>'
+        'No hay prendas seleccionadas en Catálogo.</p>'
+        '<p class="try-on-cart-choice-status" data-vton-cart-choice-status '
+        'role="status" aria-live="polite"></p>'
+        '<footer class="try-on-cart-choice-footer">'
+        '<button class="matices-button matices-button-primary" type="button" '
+        'data-vton-cart-choice-confirm disabled>Confirmar</button>'
+        '</footer>'
+        '</div></dialog>'
+        '<dialog class="try-on-cart-choice-dialog try-on-payment-choice-dialog" '
+        'data-vton-payment-choice-dialog aria-labelledby="vton-payment-choice-title">'
+        '<div class="try-on-payment-choice-content">'
+        '<h2 id="vton-payment-choice-title">¿Desea ir a pagar?</h2>'
+        '<div class="try-on-payment-choice-actions">'
+        '<button class="matices-button matices-button-primary" type="button" '
+        'data-vton-payment-yes>Sí</button>'
+        '<button class="matices-button" type="button" '
+        'data-vton-payment-no>No</button>'
+        '</div></div></dialog>'
+        '<p class="try-on-cart-total" data-vton-cart-total aria-live="polite">'
+        '<span>Total en Probador</span><strong>CLP 0</strong></p>'
         '</div>'
         '<p class="try-on-status" data-vton-status role="status" aria-live="polite"></p>'
         '</section>'
@@ -864,29 +1056,9 @@ def _catalog_page_data(
     )
     preferencia = preferencia or query.get("preference", "regular")
     recommendations = _catalog_recommendations(perfil, preferencia)
-    types = tuple(
-        sorted(
-            {
-                product.tipo_prenda
-                for product in CATALOG_PRODUCTS
-                if _normalize_search_text(product.tipo_prenda)
-                not in EXCLUDED_CATALOG_FILTER_TYPES
-            },
-            key=str.casefold,
-        )
-    )
-    sizes = tuple(
-        sorted(
-            {product.talla or "No indicada" for product in CATALOG_PRODUCTS},
-            key=str.casefold,
-        )
-    )
-    brands = tuple(
-        sorted(
-            {product.marca or "No indicada" for product in CATALOG_PRODUCTS},
-            key=str.casefold,
-        )
-    )
+    types = CATALOG_TYPES
+    sizes = CATALOG_SIZES
+    brands = CATALOG_BRANDS
     normalized_search = _normalize_search_text(query.get("search", ""))
     selected_type = query.get("type", "")
     if selected_type not in types:
@@ -1010,6 +1182,7 @@ def _virtual_try_on_products(
                 "store": CATALOG_STORES_BY_URL.get(product.url, "Vestua"),
                 "size": product.talla or "No indicada",
                 "image_url": image_url,
+                "price_clp": product.precio_clp,
                 "category": _virtual_try_on_category(product),
             }
         )
@@ -2262,6 +2435,20 @@ def _fit_information_content() -> str:
         f"<td>{escape(talla.cadera)}</td></tr>"
         for talla in STANDARD_SIZES
     )
+    variables = "".join(
+        f"""<article class="variable">
+          <div class="variable-top"><strong>{escape(name)}</strong>
+            <span class="impact {escape(impact.lower().replace(' ', '-'))}">{escape(impact)}</span></div>
+          <span class="variable-category">{escape(category)}</span>
+          <p>{escape(description)}</p>
+        </article>"""
+        for category, name, description, impact in sorted(
+            VARIABLES,
+            key=lambda variable: IMPACT_PRIORITY.get(
+                variable[3], len(IMPACT_PRIORITY)
+            ),
+        )
+    )
     return f"""<div class="fit-info-page">
       <div class="fit-info-hero">
         <span class="eyebrow">Calce · metodología</span>
@@ -2303,6 +2490,11 @@ def _fit_information_content() -> str:
         <h2>Cómo interpretar el diagnóstico</h2>
         <p>“Podría quedarte bien” indica que las medidas están dentro del rango. Los estados de límite consideran la tolerancia de la referencia; si falta cintura o cadera, la revisión será parcial.</p>
       </section>
+      <section class="fit-info-panel fit-info-recommendation-factors"
+        aria-labelledby="recommendation-factors-title">
+        <h2 id="recommendation-factors-title">Detrás de cada recomendación</h2>
+        <div class="variable-grid">{variables}</div>
+      </section>
     </div>"""
 
 
@@ -2329,7 +2521,8 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
     active_view = (
         requested_view
         if requested_view in {
-            "storefront", "home", "catalog", "account", "try-on", "profile", "info"
+            "storefront", "home", "catalog", "cart", "account", "try-on",
+            "profile", "info", "favorites"
         }
         else "home" if "wizard_step" in query else "storefront"
     )
@@ -2387,6 +2580,12 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
     info_tab_query = dict(query)
     info_tab_query["view"] = "info"
     info_tab_url = "/?" + urlencode(info_tab_query)
+    cart_tab_query = dict(query)
+    cart_tab_query["view"] = "cart"
+    cart_tab_url = "/?" + urlencode(cart_tab_query)
+    favorites_tab_query = dict(query)
+    favorites_tab_query["view"] = "favorites"
+    favorites_tab_url = "/?" + urlencode(favorites_tab_query)
     auth_base_query = {
         "view": "account",
         "wizard_step": "2",
@@ -2507,6 +2706,8 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         storefront_url=escape(storefront_tab_url, quote=True),
         home_tab_url=escape(home_tab_url, quote=True),
         catalog_tab_url=escape(catalog_tab_url, quote=True),
+        cart_tab_url=escape(cart_tab_url, quote=True),
+        favorites_tab_url=escape(favorites_tab_url, quote=True),
         try_on_tab_url=escape(try_on_tab_url, quote=True),
         info_tab_url=escape(info_tab_url, quote=True),
         sign_in_url=escape(sign_in_url, quote=True),
@@ -2518,6 +2719,10 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         catalog_link_current=' aria-current="page"' if active_view == "catalog" else "",
         try_on_link_current=' aria-current="page"' if active_view == "try-on" else "",
         info_link_current=' aria-current="page"' if active_view == "info" else "",
+        cart_link_current=' aria-current="page"' if active_view == "cart" else "",
+        favorites_link_current=(
+            'aria-current="page"' if active_view == "favorites" else ""
+        ),
         sign_in_link_current=(
             ' aria-current="page"'
             if active_view == "account" and query.get("auth_mode") != "sign-up"
@@ -2529,15 +2734,27 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
             else ""
         ),
         home_panel_hidden=(
-            ' hidden' if active_view not in {"home", "account"} else ""
+            ' hidden' if active_view != "account" else ""
         ),
+        home_panel_class=(
+            "is-account-view" if active_view == "account" else ""
+        ),
+        account_view_class=(
+            " is-account-view" if active_view == "account" else ""
+        ),
+        wizard_form_hidden=' hidden' if active_view == "account" else "",
+        account_panel_hidden=' hidden' if active_view != "account" else "",
         storefront_panel_hidden=(
             ' hidden' if active_view != "storefront" else ""
         ),
         info_panel_hidden=' hidden' if active_view != "info" else "",
         catalog_panel_hidden=' hidden' if active_view != "catalog" else "",
-        try_on_panel_hidden=' hidden' if active_view != "try-on" else "",
-        profile_panel_hidden=' hidden' if active_view != "profile" else "",
+        try_on_panel_hidden=' hidden',
+        profile_panel_hidden=' hidden',
+        cart_panel_hidden=' hidden' if active_view != "cart" else "",
+        favorites_panel_hidden=(
+            ' hidden' if active_view != "favorites" else ""
+        ),
     )
 
 

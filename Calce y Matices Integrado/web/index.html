@@ -8,7 +8,7 @@
   <meta name="supabase-publishable-key" content="{supabase_publishable_key}">
   <title>Calce Wardrobe</title>
   <link rel="icon" type="image/png" href="/assets/calce-isotipo.png">
-  <link rel="stylesheet" href="/styles.css?v=profile-avatar-remove-21">
+  <link rel="stylesheet" href="/styles.css?v=paris-out-of-stock-1">
 </head>
 <body>
   <header><div class="wrap nav">
@@ -27,6 +27,15 @@
       <a id="info-link" href="{info_tab_url}"{info_link_current}>Info</a>
     </nav>
     <div class="nav-actions">
+      <a class="cart-link" href="{cart_tab_url}"{cart_link_current}
+        aria-label="Carrito de compras" title="Carrito de compras">
+        <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+          <path d="M3 4h2l2.2 11.1a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 1.9-1.4L22 9H7"/>
+          <circle cx="10" cy="20" r="1.25"/>
+          <circle cx="18" cy="20" r="1.25"/>
+        </svg>
+        <span class="cart-count" data-cart-count hidden>0</span>
+      </a>
       <div class="nav-account-links">
         <a class="nav-auth-button" href="{sign_in_url}" data-open-account="sign-in"{sign_in_link_current}>Iniciar sesión</a>
         <a class="nav-auth-button nav-auth-button-primary" href="{sign_up_url}" data-open-account="sign-up"{sign_up_link_current}>Crear cuenta</a>
@@ -44,6 +53,8 @@
         <div class="profile-menu-content">
           <p data-profile-greeting hidden></p>
           <p data-profile-email hidden></p>
+          <a href="{favorites_tab_url}" data-profile-favorites
+            {favorites_link_current} hidden>Favoritos</a>
           <a href="/?view=profile#profile-account-data" data-profile-account hidden>Datos de Cuenta</a>
           <a href="/?view=profile#profile-payment" data-profile-payment hidden>Forma de Pago</a>
           <a href="/?view=home" data-profile-edit hidden>Tu Calce</a>
@@ -52,14 +63,15 @@
       </details>
     </div>
   </div></header>
+  <p class="visually-hidden" data-cart-status role="status" aria-live="polite"></p>
   {startup_dialogs}
   <main>
     <section id="storefront-panel" data-page-panel="storefront"{storefront_panel_hidden}>
       {storefront_content}
     </section>
     <div class="wrap">
-    <div id="home-panel" data-page-panel="home"{home_panel_hidden}>
-    <section id="style-wizard" class="style-wizard" aria-labelledby="wizard-title">
+    <div id="home-panel" class="{home_panel_class}" data-page-panel="home"{home_panel_hidden}>
+    <section id="style-wizard" class="style-wizard{account_view_class}" aria-labelledby="wizard-title">
       <div class="wizard-shell">
         <header class="wizard-header">
           <div class="wizard-heading">
@@ -79,7 +91,7 @@
             </div>
           </div>
         </header>
-        <form method="get" action="/" data-style-wizard-form>
+        <form method="get" action="/" data-style-wizard-form{wizard_form_hidden}>
           <input type="hidden" name="wizard_step" value="{wizard_step}">
           <section class="wizard-step" data-wizard-panel="1" aria-labelledby="wizard-photo-title">
             <div class="matices-photo-panel">
@@ -178,7 +190,7 @@
           </section>
         </form>
         <section class="supabase-account supabase-account-page" data-account-panel
-          aria-label="Acceso a tu cuenta" hidden>
+          aria-label="Acceso a tu cuenta"{account_panel_hidden}>
           <a class="account-home-button" href="{storefront_url}"
             aria-label="Volver a Home" title="Volver a Home">
             <span aria-hidden="true">←</span>
@@ -264,6 +276,56 @@
     <section id="catalog-panel" data-page-panel="catalog"{catalog_panel_hidden}>
       {garment_catalog}
     </section>
+    <section id="cart-panel" data-page-panel="cart"{cart_panel_hidden}>
+      <div class="wrap cart-page">
+        <header class="cart-heading">
+          <div>
+            <span class="eyebrow">Tu selección</span>
+            <h1>Carrito de compras</h1>
+            <p class="sub">Revisa las prendas antes de continuar.</p>
+          </div>
+        </header>
+        <div class="cart-empty" data-cart-empty hidden>
+          <p>Tu carrito está vacío.</p>
+          <a class="matices-button matices-button-primary" href="{catalog_tab_url}">
+            Explorar catálogo</a>
+        </div>
+        <div class="cart-content" data-cart-content hidden>
+          <div class="cart-items" data-cart-items aria-label="Productos en el carrito"></div>
+          <aside class="cart-summary">
+            <h2>Resumen</h2>
+            <p><span>Productos</span><strong data-cart-item-count>0</strong></p>
+            <p><span>Total referencial</span><strong data-cart-total>—</strong></p>
+            <button class="matices-button matices-button-primary" type="button"
+              data-cart-confirm>Confirmar selección</button>
+            <p class="cart-payment-note">Esta confirmación no reserva productos ni procesa pagos.
+              Para completar la compra, revisa disponibilidad y paga en la tienda de cada prenda.</p>
+            <p class="cart-confirmation" data-cart-confirmation role="status"
+              aria-live="polite" hidden></p>
+          </aside>
+        </div>
+      </div>
+    </section>
+    <section id="favorites-panel" data-page-panel="favorites"{favorites_panel_hidden}>
+      <div class="wrap favorites-page">
+        <header class="cart-heading">
+          <div>
+            <span class="eyebrow">Mi selección</span>
+            <h1>Favoritos</h1>
+            <p class="sub">Prendas que guardaste del catálogo.</p>
+          </div>
+        </header>
+        <div class="favorites-empty" data-favorites-empty hidden>
+          <p>Aún no has guardado prendas en Favoritos.</p>
+          <a class="matices-button matices-button-primary" href="{catalog_tab_url}">
+            Explorar catálogo</a>
+        </div>
+        <p class="favorites-status" data-favorites-status role="status"
+          aria-live="polite"></p>
+        <div class="catalog-grid favorites-grid" data-favorites-list
+          data-view="5" aria-label="Prendas favoritas"></div>
+      </div>
+    </section>
     <section id="try-on-panel" data-page-panel="try-on"{try_on_panel_hidden}>
       {virtual_try_on_panel}
     </section>
@@ -346,6 +408,6 @@
       </div>
     </section>
   </div></main>
-  <script src="/app.js?v=catalog-search-only-20" defer></script>
+  <script src="/app.js?v=paris-out-of-stock-1" defer></script>
 </body>
 </html>

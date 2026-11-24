@@ -23,7 +23,18 @@ conserva la guía para foto, medidas y recomendaciones de calce.
    medidas y el calce elegido.
 3. Continúa al catálogo para buscar, filtrar por tipo, ordenar y comparar
    prendas. Las tarjetas y la comparación muestran el calce estimado y las
-   medidas referenciales disponibles.
+   medidas referenciales disponibles. Usa el botón **Añadir al carrito** con el
+   símbolo de carrito en cada prenda para agregarla sin salir del catálogo.
+   También puedes indicar la cantidad y talla que llevarás; estos campos no
+   aparecen para Vestua, donde se conserva la talla publicada y se agrega una
+   sola unidad. La app
+   todavía no genera órdenes ni procesa pagos, así que cada compra debe
+   completarse directamente en la tienda de origen.
+   Usa el corazón en la esquina inferior izquierda de una prenda para guardarla
+   en **Favoritos**; encontrarás esa lista en el menú de usuario. Los favoritos
+   se conservan en el almacenamiento local de este navegador.
+   Sus tarjetas usan el mismo formato del Catálogo, con opciones de talla y
+   acceso directo al carrito.
 
    El filtro **Tipo de prenda** agrupa las prendas superiores e inferiores y los
    vestidos. Omite las opciones **Ropa interior**, **Ropa de playa** y **Ropa**;
@@ -61,6 +72,23 @@ independientemente con una sola prenda y envía los archivos al endpoint
 `/try-on-file`. DataToBiz también funciona de forma independiente, pero admite
 solo una prenda superior individual. Al elegir cualquiera de esos proveedores
 directos, no se llama a los demás.
+
+En **Probador**, las prendas seleccionadas en **Catálogo** aparecen en el listado
+sin casillas ni botón de confirmación. Al pasar el puntero o el foco por una
+prenda, se muestra su imagen de referencia. El total del listado aparece abajo
+a la derecha. **Ir a Carrito** se habilita cuando hay prendas en el Probador y
+abre la ventana **¿Qué desea llevar?** con las prendas seleccionadas inicialmente,
+junto con la talla y cantidad indicadas en **Catálogo**. Cada prenda muestra
+su cantidad en el cuadro **Cantidad a llevar**; puedes ajustar allí la cantidad
+de París y desmarcar las prendas que quieras dejar fuera. Al seleccionar
+una prenda de París para el Probador desde **Catálogo**, aparece una ventana
+para elegir la talla que se usará en la prueba.
+Al pulsar **Confirmar**, las prendas marcadas se agregan al carrito y se pregunta
+si deseas ir a pagar: **Sí** abre el carrito y **No** vuelve al catálogo.
+Después de confirmar, las casillas de selección del **Catálogo** para el
+Probador se desmarcan; las prendas agregadas permanecen en el carrito.
+Las categorías que los proveedores no admiten se muestran por separado y no
+pueden seleccionarse para generar una prueba virtual.
 
 Clothes Refiner es una etapa de mejora, no un generador independiente: primero
 solicita una imagen preliminar a Try on Clothes Pro y después la envía junto con
@@ -129,7 +157,8 @@ Al activar **Recuérdame** en el paso de la foto con una sesión iniciada, la fo
 y la paleta se guardan en la cuenta. Las fotos de perfil y de Tu Calce se guardan
 en un bucket privado de Supabase Storage, con acceso limitado a la persona
 propietaria; se admiten fotos JPEG, PNG, WebP, GIF o AVIF de hasta 10 MB. Sin
-sesión, Tu Calce y el Probador solicitan iniciar sesión y conservan el destino.
+sesión, Tu Calce y el Probador ocultan su contenido, solicitan iniciar sesión y
+conservan el destino solicitado.
 
 1. En el panel SQL de Supabase, ejecuta [`supabase/schema.sql`](./supabase/schema.sql).
    El esquema actualiza la tabla de perfiles, sincroniza el correo desde Auth,
@@ -202,14 +231,23 @@ solo las publicaciones que tienen una referencia de imagen disponible; el resto
 se omite. También se excluye cualquier publicación identificada como calzado.
 Desde el catálogo también se puede abrir la colección de mujer de
 [Paris](https://www.paris.cl/mujer/) y [Tricot](https://www.tricot.cl/mujer).
-La instantánea actual contiene 2.176 fichas con imagen de Tricot y 9.948 de
-Paris, recopiladas al recorrer las 304 páginas de la categoría de moda de Paris
-(30.349 resultados informados). El importador consulta la API pública de Paris
+La instantánea actual contiene 2.176 fichas con imagen de Tricot (revisadas el
+29 de octubre de 2026) y 9.855 de Paris (revisadas el 24 de noviembre de 2026),
+recopiladas al recorrer las 331 páginas de la categoría de moda de Paris
+(33.079 resultados informados). El importador consulta la API pública de Paris
 en lotes de 100 productos y conserva solo fichas con imagen, excluyendo
-calzado. Para actualizar los datos públicos, ejecuta
+calzado. Las tallas listadas por sus variantes se muestran en un selector con
+una estimación de ajuste por talla basada en las medidas ingresadas y la tabla
+estándar; es orientativa, y la disponibilidad de stock debe confirmarse en la
+ficha de Paris. Para actualizar los datos públicos, ejecuta
 `python3 scripts/importar_catalogo_mujer.py`; el proceso puede tardar varios
 minutos debido al volumen de Paris. Al pulsar la imagen de cada tarjeta se abre
 la ficha de producto en la tienda de origen.
+El catálogo público de Paris no informa el stock por talla. Para marcar
+manualmente una talla agotada, añade `out_of_stock_sizes` al producto
+correspondiente en `data/tiendas_mujer.json`, por ejemplo `["M"]`; se mostrará
+en gris y no se podrá elegir. El importador conserva estas marcas mientras la
+talla siga apareciendo entre las variantes del producto.
 Las combinaciones sin referencia de medidas no reciben una puntuación de calce.
 Los valores de calce provienen de la matriz y son orientativos: no son medidas
 verificadas de la publicación enlazada.
