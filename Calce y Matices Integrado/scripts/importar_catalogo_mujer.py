@@ -311,6 +311,73 @@ def _paris_localized(value: object) -> str:
     return str(value or "").strip()
 
 
+def _paris_size_sort_key(size: str) -> tuple:
+    normalized = " ".join(size.casefold().split())
+    alpha_order = {
+        "xxs": 0,
+        "2xs": 0,
+        "xs": 1,
+        "s": 2,
+        "s-m": 2.5,
+        "sm": 2.5,
+        "m": 3,
+        "m-l": 3.5,
+        "ml": 3.5,
+        "l": 4,
+        "l-xl": 4.5,
+        "lxl": 4.5,
+        "xl": 5,
+        "xl-xxl": 5.5,
+        "xlxxl": 5.5,
+        "2xl": 6,
+        "xxl": 6,
+        "3xl": 7,
+        "xxxl": 7,
+        "4xl": 8,
+        "5xl": 9,
+    }
+    if normalized in alpha_order:
+        return (0, alpha_order[normalized], normalized)
+    if normalized in {"talla única", "única", "one size", "one-size"}:
+        return (2, 0, normalized)
+    natural_parts = tuple(
+        (0, float(part.replace(",", ".")))
+        if re.fullmatch(r"\d+(?:[,.]\d+)?", part)
+        else (1, part)
+        for part in re.split(r"(\d+(?:[,.]\d+)?)", normalized)
+        if part
+    )
+    return (1, natural_parts, normalized)
+
+
+def _paris_available_sizes(item: Dict[str, object]) -> List[str]:
+    variants = item.get("variants")
+    variants = variants if isinstance(variants, list) else []
+    master_variant = item.get("masterVariant")
+    if isinstance(master_variant, dict):
+        variants = [*variants, master_variant]
+
+    sizes = []
+    seen_sizes = set()
+    for variant in variants:
+        if not isinstance(variant, dict):
+            continue
+        attributes = variant.get("attributes")
+        if not isinstance(attributes, list):
+            continue
+        for attribute in attributes:
+            if not isinstance(attribute, dict):
+                continue
+            name = str(attribute.get("name", "")).casefold()
+            if name not in {"size", "talla"}:
+                continue
+            size = _paris_localized(attribute.get("value"))
+            if size and size.casefold() not in seen_sizes:
+                seen_sizes.add(size.casefold())
+                sizes.append(size)
+    return sorted(sizes, key=_paris_size_sort_key)
+
+
 def _paris_product(item: Dict[str, object]) -> Optional[Dict[str, object]]:
     title = _paris_localized(item.get("name"))
     slug = _paris_localized(item.get("slug"))
@@ -383,6 +450,7 @@ def _paris_product(item: Dict[str, object]) -> Optional[Dict[str, object]]:
         "reference_category": reference_category,
         "brand": _paris_localized(item.get("brand")) or "Paris",
         "size": "",
+        "available_sizes": _paris_available_sizes(item),
         "price_clp": price,
         "url": product_url,
         "image_url": image_url,
@@ -483,6 +551,43 @@ def _append_paris_products(
             products.append(product)
 
 
+def _preserve_out_of_stock_sizes(
+    products: List[Dict[str, object]],
+    previous_products: List[Dict[str, object]],
+) -> None:
+    previous_sizes_by_url = {}
+    for previous in previous_products:
+        if not isinstance(previous, dict) or previous.get("store") != "Paris":
+            continue
+        url = previous.get("url")
+        sizes = previous.get("out_of_stock_sizes")
+        if isinstance(url, str) and isinstance(sizes, list):
+            previous_sizes_by_url[url] = {
+                size.strip().casefold()
+                for size in sizes
+                if isinstance(size, str) and size.strip()
+            }
+
+    for product in products:
+        if product.get("store") != "Paris":
+            continue
+        available_sizes = product.get("available_sizes")
+        if not isinstance(available_sizes, list):
+            continue
+        previous_sizes = previous_sizes_by_url.get(str(product.get("url")), set())
+        retained_sizes = [
+            size.strip()
+            for size in available_sizes
+            if isinstance(size, str)
+            and size.strip()
+            and size.strip().casefold() in previous_sizes
+        ]
+        if retained_sizes:
+            product["out_of_stock_sizes"] = retained_sizes
+        else:
+            product.pop("out_of_stock_sizes", None)
+
+
 def _fetch_paris_products() -> tuple[List[Dict[str, object]], int]:
     group_id, application_id = _paris_search_configuration(
         _fetch(PARIS_CATEGORY_URL)
@@ -519,6 +624,15 @@ def main() -> None:
     time.sleep(0.5)
     paris_products, paris_total = _fetch_paris_products()
     products = tricot_products + paris_products
+    previous_products = []
+    if OUTPUT.is_file():
+        previous_data = json.loads(OUTPUT.read_text(encoding="utf-8"))
+        if not isinstance(previous_data, dict):
+            raise ValueError("El catálogo previo de tiendas tiene un formato inválido.")
+        previous_products = previous_data.get("products", [])
+        if not isinstance(previous_products, list):
+            raise ValueError("El catálogo previo no contiene una lista de productos.")
+    _preserve_out_of_stock_sizes(products, previous_products)
     products.sort(key=lambda product: (str(product["store"]), str(product["id"])))
     data = {
         "checked_at": date.today().isoformat(),

@@ -3,7 +3,27 @@ window.calceAuthStateReady = new Promise(resolve => {
   resolveAuthStateReady = resolve;
 });
 
+const protectedPagePanelIds = {
+  home: "home-panel",
+  "try-on": "try-on-panel",
+  profile: "profile-panel",
+};
+
+const setProtectedPageVisibility = isAuthenticated => {
+  const view = new URLSearchParams(window.location.search).get("view");
+  const panelId = protectedPagePanelIds[view];
+  if (!panelId) return;
+  const panel = document.getElementById(panelId);
+  if (panel) panel.hidden = !isAuthenticated;
+  if (isAuthenticated) {
+    window.dispatchEvent(new CustomEvent("calce:protected-page-visible", {
+      detail: { view },
+    }));
+  }
+};
+
 const finishAuthStateInitialization = isAuthenticated => {
+  setProtectedPageVisibility(isAuthenticated);
   if (!resolveAuthStateReady) return;
   resolveAuthStateReady(isAuthenticated);
   resolveAuthStateReady = null;
@@ -41,6 +61,866 @@ const readSelectedCatalogGarments = () => {
     product.product_url,
   );
 };
+const clearSelectedCatalogGarments = () => {
+  try {
+    sessionStorage.removeItem(catalogSelectionStorageKey);
+  } catch (error) {
+    console.error("No se pudo reiniciar la selección del catálogo.", error);
+    return false;
+  }
+  window.dispatchEvent(new Event("calce:catalog-selection-cleared"));
+  return true;
+};
+
+const sizeMeasureDefinitions = [
+  { fieldName: "bust", label: "Busto", rangeKey: "Bust" },
+  { fieldName: "waist", label: "Cintura", rangeKey: "Waist" },
+  { fieldName: "hip", label: "Cadera", rangeKey: "Hip" },
+];
+const readEnteredSizeMeasures = () => sizeMeasureDefinitions.flatMap(
+  ({ fieldName, label, rangeKey }) => {
+    const field = document.querySelector(`[name="${fieldName}"]`);
+    const value = Number.parseFloat(field?.value.replace(",", ".") ?? "");
+    return Number.isFinite(value) && value > 0
+      ? [{ value, label, rangeKey }]
+      : [];
+  },
+);
+let standardSizeElementsCache;
+const standardSizeElements = () => {
+  if (!standardSizeElementsCache) {
+    standardSizeElementsCache = Array.from(
+      document.querySelectorAll("[data-standard-size]"),
+    );
+  }
+  return standardSizeElementsCache;
+};
+const recommendStandardSizeRanges = (
+  enteredMeasures = readEnteredSizeMeasures(),
+) => {
+  const sizes = standardSizeElements();
+  if (!enteredMeasures.length || !sizes.length) {
+    return { sizes: [], exactMatch: false };
+  }
+  const rangesFor = size => enteredMeasures.map(({ value, rangeKey }) => {
+    const minimum = Number(size.dataset[`size${rangeKey}Min`]);
+    const maximum = Number(size.dataset[`size${rangeKey}Max`]);
+    return {
+      compatible: value >= minimum && value <= maximum,
+      distance: Math.max(minimum - value, value - maximum, 0),
+    };
+  });
+  const exactSizes = sizes.filter(
+    size => rangesFor(size).every(range => range.compatible),
+  );
+  if (exactSizes.length) return { sizes: exactSizes, exactMatch: true };
+
+  const distances = sizes.map(size => rangesFor(size)
+    .reduce((total, range) => total + range.distance, 0));
+  const minimumDistance = Math.min(...distances);
+  return {
+    sizes: sizes.filter((_, index) =>
+      Math.abs(distances[index] - minimumDistance) < 1e-9,
+    ),
+    exactMatch: false,
+  };
+};
+let parisSizeFitContextCache;
+const getParisSizeFitContext = (enteredMeasures = readEnteredSizeMeasures()) => {
+  const cacheKey = JSON.stringify(
+    enteredMeasures.map(({ value, rangeKey }) => [rangeKey, value]),
+  );
+  if (parisSizeFitContextCache?.cacheKey === cacheKey) {
+    return parisSizeFitContextCache;
+  }
+  const sizes = standardSizeElements();
+  parisSizeFitContextCache = {
+    cacheKey,
+    sizes,
+    standardLabels: new Set(
+      sizes.map(size => normalizeSizeOption(size.dataset.sizeLabel || "")),
+    ),
+    recommendation: recommendStandardSizeRanges(enteredMeasures),
+    descriptions: new Map(),
+  };
+  return parisSizeFitContextCache;
+};
+const normalizeSizeOption = size => size.trim().toLocaleUpperCase("es-CL")
+  .replace(/\s+/g, "");
+const getParisSizeFitDescription = (
+  sizeLabel,
+  fitContext = getParisSizeFitContext(),
+) => {
+  const normalizedLabel = normalizeSizeOption(sizeLabel);
+  if (fitContext.descriptions.has(normalizedLabel)) {
+    return fitContext.descriptions.get(normalizedLabel);
+  }
+  const { sizes, standardLabels, recommendation } = fitContext;
+  const labelParts = normalizedLabel.split(/[/-]/).filter(Boolean);
+  const isStandardAlphaRange = labelParts.length > 1
+    && labelParts.every(part => standardLabels.has(part));
+  const equivalentSizes = sizes.filter(size => {
+    const standardLabel = normalizeSizeOption(size.dataset.sizeLabel || "");
+    const european = normalizeSizeOption(size.dataset.sizeEu || "");
+    const us = normalizeSizeOption(size.dataset.sizeUs || "");
+    const europeanParts = european.split(/[/-]/).filter(Boolean);
+    const usParts = us.split(/[/-]/).filter(Boolean);
+    return normalizedLabel === standardLabel
+      || normalizedLabel === european
+      || normalizedLabel === us
+      || (
+        /^\d+$/.test(normalizedLabel)
+        && (europeanParts.includes(normalizedLabel) || usParts.includes(normalizedLabel))
+      )
+      || (isStandardAlphaRange && labelParts.includes(standardLabel));
+  });
+  let description;
+  if (!equivalentSizes.length) {
+    description = "Sin equivalencia de medidas";
+  } else if (!recommendation.sizes.length) {
+    description = "Ingresa tus medidas";
+  } else {
+    const recommendedIndices = recommendation.sizes
+      .map(size => sizes.indexOf(size))
+      .filter(index => index >= 0);
+    if (!recommendedIndices.length) {
+      description = "Revisa el ajuste";
+    } else {
+      const smallestRecommendedIndex = Math.min(...recommendedIndices);
+      const largestRecommendedIndex = Math.max(...recommendedIndices);
+      const descriptions = new Set(equivalentSizes.map(size => {
+        const index = sizes.indexOf(size);
+        if (recommendation.exactMatch && recommendedIndices.includes(index)) {
+          return "Podría quedarte bien";
+        }
+        if (
+          recommendedIndices.includes(index)
+          || Math.min(...recommendedIndices.map(value => Math.abs(index - value))) <= 1
+        ) {
+          return "Revisa el ajuste";
+        }
+        if (index > largestRecommendedIndex) return "Podría quedar holgada";
+        if (index < smallestRecommendedIndex) return "Podría quedar estrecha";
+        return "Revisa el ajuste";
+      }));
+      description = descriptions.size === 1
+        ? descriptions.values().next().value
+        : "Revisa el ajuste";
+    }
+  }
+  fitContext.descriptions.set(normalizedLabel, description);
+  return description;
+};
+const updateParisSizeSelect = (sizeSelect, fitContext) => {
+  if (!sizeSelect || sizeSelect.tagName !== "SELECT") return;
+  const context = fitContext || getParisSizeFitContext();
+  Array.from(sizeSelect.options).forEach(option => {
+    if (!option.value) return;
+    if (option.disabled) {
+      option.classList.add("catalog-size-unavailable");
+      option.textContent = `${option.value} — Sin stock`;
+      return;
+    }
+    option.classList.remove("catalog-size-unavailable");
+    option.textContent =
+      `${option.value} — ${getParisSizeFitDescription(option.value, context)}`;
+  });
+};
+const refreshParisSizeSelects = () => {
+  const fitContext = getParisSizeFitContext();
+  document.querySelectorAll("select[data-catalog-size-choice]")
+    .forEach(select => updateParisSizeSelect(select, fitContext));
+};
+document.querySelectorAll('[name="bust"], [name="waist"], [name="hip"]')
+  .forEach(field => field.addEventListener("input", refreshParisSizeSelects));
+
+(() => {
+  const storageKey = "calce-shopping-cart";
+  const status = document.querySelector("[data-cart-status]");
+  const cartLink = document.querySelector(".cart-link");
+  const countBadge = document.querySelector("[data-cart-count]");
+  const cartPanel = document.querySelector('[data-page-panel="cart"]');
+  const emptyState = cartPanel?.querySelector("[data-cart-empty]");
+  const cartContent = cartPanel?.querySelector("[data-cart-content]");
+  const cartList = cartPanel?.querySelector("[data-cart-items]");
+  const itemCount = cartPanel?.querySelector("[data-cart-item-count]");
+  const total = cartPanel?.querySelector("[data-cart-total]");
+  const confirmation = cartPanel?.querySelector("[data-cart-confirmation]");
+  const currency = new Intl.NumberFormat("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
+
+  const reportStorageError = error => {
+    if (status) {
+      status.textContent = "No se pudo guardar el carrito en este navegador.";
+    }
+    console.error("No se pudo acceder al carrito guardado.", error);
+  };
+
+  const normalizeCartItem = item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    try {
+      const productUrl = new URL(item.product_url);
+      if (productUrl.protocol !== "https:" || !item.title) return null;
+      const imageUrl = typeof item.image_url === "string" && item.image_url
+        ? new URL(item.image_url)
+        : null;
+      const price = item.price_clp;
+      const quantity = item.quantity === undefined ? 1 : item.quantity;
+      if (!Number.isSafeInteger(quantity) || quantity < 1) return null;
+      return {
+        product_url: productUrl.href,
+        image_url: imageUrl?.protocol === "https:" ? imageUrl.href : "",
+        store: typeof item.store === "string" ? item.store : "",
+        brand: typeof item.brand === "string" ? item.brand : "",
+        title: String(item.title),
+        size: typeof item.size === "string" ? item.size : "",
+        quantity,
+        price_clp: Number.isFinite(price) && price >= 0 ? price : null,
+      };
+    } catch (error) {
+      if (error instanceof TypeError) return null;
+      throw error;
+    }
+  };
+
+  const readCart = () => {
+    try {
+      const savedCart = localStorage.getItem(storageKey);
+      if (!savedCart) return [];
+      const parsedCart = JSON.parse(savedCart);
+      if (!Array.isArray(parsedCart)) {
+        throw new Error("El carrito guardado no es una lista.");
+      }
+      return parsedCart.map(normalizeCartItem).filter(Boolean);
+    } catch (error) {
+      reportStorageError(error);
+      return [];
+    }
+  };
+
+  let items = readCart();
+
+  const updateAddButtons = () => {
+    document.querySelectorAll("[data-cart-add]").forEach(button => {
+      const card = button.closest("[data-catalog-card]");
+      const productUrl = card?.querySelector(".catalog-buy-link")?.href;
+      const inCart = items.some(item => item.product_url === productUrl);
+      const title = card?.querySelector(".catalog-item-info h3")?.textContent?.trim();
+      button.disabled = inCart;
+      const quantityInput = card?.querySelector("[data-catalog-quantity]");
+      const sizeInput = card?.querySelector("[data-catalog-size-choice]");
+      if (quantityInput) quantityInput.disabled = inCart;
+      if (sizeInput) sizeInput.disabled = inCart;
+      const label = inCart
+        ? `Ya está en el carrito: ${title || "esta prenda"}`
+        : `Añadir ${title || "esta prenda"} al carrito`;
+      button.setAttribute("aria-label", label);
+      button.title = inCart ? label : "Añadir al carrito";
+      const visibleLabel = button.querySelector(".catalog-cart-add-label");
+      if (visibleLabel) {
+        visibleLabel.textContent = inCart ? "En el carrito" : "Añadir al carrito";
+      }
+    });
+  };
+
+  const createElement = (tagName, className, text) => {
+    const element = document.createElement(tagName);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  };
+
+  const renderCart = () => {
+    const count = items.reduce((sum, item) => sum + item.quantity, 0);
+    if (countBadge) {
+      countBadge.hidden = count === 0;
+      countBadge.textContent = String(count);
+    }
+    if (cartLink) {
+      cartLink.setAttribute(
+        "aria-label",
+        `Carrito de compras, ${count} ${count === 1 ? "producto" : "productos"}`,
+      );
+    }
+    if (emptyState) emptyState.hidden = count !== 0;
+    if (cartContent) cartContent.hidden = count === 0;
+    if (itemCount) itemCount.textContent = String(count);
+    if (total) {
+      const hasUnknownPrice = items.some(item => item.price_clp === null);
+      total.textContent = hasUnknownPrice
+        ? "No disponible"
+        : currency.format(items.reduce(
+          (sum, item) => sum + item.price_clp * item.quantity,
+          0,
+        ));
+    }
+
+    if (cartList) {
+      cartList.replaceChildren();
+      items.forEach(item => {
+        const row = createElement("article", "cart-item");
+        const image = createElement("img");
+        image.src = item.image_url || "/assets/calce-isotipo.png";
+        image.alt = `Imagen referencial de ${item.title}`;
+        row.append(image);
+
+        const info = createElement("div", "cart-item-info");
+        info.append(createElement(
+          "span",
+          "cart-item-store",
+          [item.store, item.brand].filter(Boolean).join(" · "),
+        ));
+        info.append(createElement("h2", "", item.title));
+        info.append(createElement(
+          "span",
+          "cart-item-size",
+          `${item.store === "Vestua" ? "Talla publicada" : "Talla elegida"}: ${item.size || "No indicada"}`,
+        ));
+        info.append(createElement(
+          "span",
+          "cart-item-quantity",
+          `Cantidad: ${item.quantity}`,
+        ));
+        info.append(createElement(
+          "strong",
+          "cart-item-price",
+          item.price_clp === null
+            ? "Precio no disponible"
+            : `Subtotal: ${currency.format(item.price_clp * item.quantity)}`,
+        ));
+        row.append(info);
+
+        const actions = createElement("div", "cart-item-actions");
+        const storeLink = createElement("a", "", `Ver en ${item.store || "la tienda"}`);
+        storeLink.href = item.product_url;
+        storeLink.target = "_blank";
+        storeLink.rel = "noopener noreferrer";
+        actions.append(storeLink);
+        const removeButton = createElement("button", "cart-item-remove", "Quitar");
+        removeButton.type = "button";
+        removeButton.dataset.cartRemove = item.product_url;
+        removeButton.setAttribute("aria-label", `Quitar ${item.title} del carrito`);
+        actions.append(removeButton);
+        row.append(actions);
+        cartList.append(row);
+      });
+    }
+    updateAddButtons();
+  };
+
+  const saveCart = nextItems => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(nextItems));
+      items = nextItems;
+      if (confirmation) confirmation.hidden = true;
+      renderCart();
+      return true;
+    } catch (error) {
+      reportStorageError(error);
+      return false;
+    }
+  };
+
+  document.addEventListener("click", event => {
+    if (!(event.target instanceof Element)) return;
+    const addButton = event.target.closest("[data-cart-add]");
+    if (addButton) {
+      const card = addButton.closest("[data-catalog-card]");
+      const productLink = card?.querySelector(".catalog-buy-link");
+      const title = card?.querySelector(".catalog-item-info h3")?.textContent?.trim();
+      if (!card || !productLink || !title) {
+        if (status) status.textContent = "No se pudo identificar el producto.";
+        return;
+      }
+      const productUrl = productLink.href;
+      if (items.some(item => item.product_url === productUrl)) return;
+      const quantityInput = card.querySelector("[data-catalog-quantity]");
+      const sizeInput = card.querySelector("[data-catalog-size-choice]");
+      const quantity = quantityInput ? Number(quantityInput.value) : 1;
+      const size = sizeInput
+        ? sizeInput.value.trim()
+        : card.dataset.catalogSize || "";
+      const selectedSizeOption = sizeInput?.tagName === "SELECT"
+        ? sizeInput.selectedOptions[0]
+        : null;
+      if (!Number.isSafeInteger(quantity) || quantity < 1) {
+        if (status) status.textContent = "Indica una cantidad válida (mínimo 1).";
+        quantityInput?.focus();
+        return;
+      }
+      if (sizeInput && (!size || selectedSizeOption?.disabled)) {
+        if (status) {
+          status.textContent = selectedSizeOption?.disabled
+            ? `La talla ${size} no tiene stock.`
+            : "Indica la talla que llevarás.";
+        }
+        sizeInput.focus();
+        return;
+      }
+      const rawPrice = card.dataset.catalogPrice;
+      const parsedPrice = rawPrice ? Number(rawPrice) : Number.NaN;
+      const item = normalizeCartItem({
+        product_url: productUrl,
+        image_url: card.querySelector(".catalog-image")?.src || "",
+        store: card.dataset.catalogStore || "",
+        brand: card.dataset.catalogBrand || "",
+        title,
+        size,
+        quantity,
+        price_clp: Number.isFinite(parsedPrice) ? parsedPrice : null,
+      });
+      if (!item) {
+        if (status) status.textContent = "No se pudo agregar este producto al carrito.";
+        return;
+      }
+      if (!saveCart([...items, item])) return;
+      if (status) status.textContent = `${title} se agregó al carrito.`;
+      return;
+    }
+
+    const removeButton = event.target.closest("[data-cart-remove]");
+    if (removeButton) {
+      const productUrl = removeButton.dataset.cartRemove;
+      saveCart(items.filter(item => item.product_url !== productUrl));
+      return;
+    }
+
+    const confirmButton = event.target.closest("[data-cart-confirm]");
+    if (confirmButton && confirmation) {
+      confirmation.textContent =
+        "Selección confirmada. No se generó una orden ni se realizó un pago. " +
+        "Abre cada tienda desde «Ver en la tienda» para revisar disponibilidad y completar la compra.";
+      confirmation.hidden = false;
+    }
+  });
+
+  window.addEventListener("calce:add-to-cart", event => {
+    const detail = event.detail;
+    if (!detail || !Array.isArray(detail.products)) return;
+    const normalizedProducts = detail.products
+      .map(normalizeCartItem)
+      .filter(Boolean);
+    const knownUrls = new Set(items.map(item => item.product_url));
+    const additions = normalizedProducts.filter(item => {
+      if (knownUrls.has(item.product_url)) return false;
+      knownUrls.add(item.product_url);
+      return true;
+    });
+    detail.addedCount = additions.length;
+    detail.invalidCount = detail.products.length - normalizedProducts.length;
+    detail.saved = additions.length === 0 || saveCart([...items, ...additions]);
+  });
+
+  window.addEventListener("storage", event => {
+    if (event.key !== storageKey) return;
+    items = readCart();
+    renderCart();
+  });
+
+  window.addEventListener("calce:catalog-cards-rendered", updateAddButtons);
+
+  renderCart();
+})();
+
+(() => {
+  const storageKey = "calce-favorite-products";
+  const catalogStatus = document.querySelector("[data-catalog-favorite-status]");
+  const favoritesPanel = document.querySelector('[data-page-panel="favorites"]');
+  const favoritesStatus = favoritesPanel?.querySelector("[data-favorites-status]");
+  const favoritesList = favoritesPanel?.querySelector("[data-favorites-list]");
+  const favoritesEmpty = favoritesPanel?.querySelector("[data-favorites-empty]");
+  const currency = new Intl.NumberFormat("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
+
+  const setStatus = message => {
+    const status = favoritesPanel && !favoritesPanel.hidden
+      ? favoritesStatus
+      : catalogStatus;
+    if (status) status.textContent = message;
+  };
+  const reportStorageError = (message, error) => {
+    setStatus(message);
+    console.error(message, error);
+  };
+  const normalizeProduct = product => {
+    if (!product || typeof product !== "object" || Array.isArray(product)) return null;
+    try {
+      const productUrl = new URL(product.product_url);
+      if (
+        productUrl.protocol !== "https:"
+        || typeof product.title !== "string"
+        || !product.title.trim()
+      ) {
+        return null;
+      }
+      let imageUrl = "";
+      if (typeof product.image_url === "string" && product.image_url) {
+        try {
+          const parsedImageUrl = new URL(product.image_url);
+          if (parsedImageUrl.protocol === "https:") {
+            imageUrl = parsedImageUrl.href;
+          }
+        } catch (error) {
+          if (!(error instanceof TypeError)) throw error;
+        }
+      }
+      return {
+        product_url: productUrl.href,
+        image_url: imageUrl,
+        store: typeof product.store === "string" ? product.store : "",
+        brand: typeof product.brand === "string" ? product.brand : "",
+        title: product.title,
+        size: typeof product.size === "string" ? product.size : "",
+        type: typeof product.type === "string" ? product.type : "",
+        fit_label: typeof product.fit_label === "string" ? product.fit_label : "",
+        fit_badge: typeof product.fit_badge === "string" ? product.fit_badge : "",
+        fit_badge_class: ["tight", "loose", "partial"].includes(product.fit_badge_class)
+          ? product.fit_badge_class
+          : "partial",
+        available_sizes: Array.isArray(product.available_sizes)
+          ? Array.from(new Set(
+            product.available_sizes
+              .filter(size => typeof size === "string" && size.trim())
+              .map(size => size.trim()),
+          ))
+          : [],
+        out_of_stock_sizes: Array.isArray(product.out_of_stock_sizes)
+          ? Array.from(new Set(
+            product.out_of_stock_sizes
+              .filter(size => typeof size === "string" && size.trim())
+              .map(size => size.trim()),
+          ))
+          : [],
+        price_clp: Number.isFinite(product.price_clp) && product.price_clp >= 0
+          ? product.price_clp
+          : null,
+      };
+    } catch (error) {
+      if (error instanceof TypeError) return null;
+      throw error;
+    }
+  };
+  const readFavorites = () => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) throw new Error("Favoritos no es una lista.");
+      return parsed.map(normalizeProduct).filter(Boolean);
+    } catch (error) {
+      reportStorageError("No se pudieron leer tus Favoritos.", error);
+      return [];
+    }
+  };
+
+  let favorites = readFavorites();
+
+  const createHeartButton = product => {
+    const button = document.createElement("button");
+    button.className = "catalog-favorite-toggle";
+    button.type = "button";
+    button.dataset.favoriteToggle = "";
+    button.dataset.productUrl = product.product_url;
+    button.dataset.productTitle = product.title;
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute(
+      "d",
+      "M20.8 4.6a5.6 5.6 0 0 0-7.9 0L12 5.5l-.9-.9a5.6 5.6 0 0 0-7.9 7.9L12 21l8.8-8.5a5.6 5.6 0 0 0 0-7.9z",
+    );
+    icon.append(path);
+    const hiddenLabel = document.createElement("span");
+    hiddenLabel.className = "visually-hidden";
+    hiddenLabel.textContent = "Quitar de Favoritos";
+    button.append(icon, hiddenLabel);
+    return button;
+  };
+
+  const createCartButton = product => {
+    const button = document.createElement("button");
+    button.className = "catalog-cart-add";
+    button.type = "button";
+    button.dataset.cartAdd = "";
+    button.title = "Añadir al carrito";
+    button.setAttribute("aria-label", `Añadir ${product.title} al carrito`);
+    const label = document.createElement("span");
+    label.className = "catalog-cart-add-label";
+    label.textContent = "Añadir al carrito";
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute(
+      "d",
+      "M3 4h2l2.2 11.1a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 1.9-1.4L22 9H7",
+    );
+    const frontWheel = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    frontWheel.setAttribute("cx", "10");
+    frontWheel.setAttribute("cy", "20");
+    frontWheel.setAttribute("r", "1.25");
+    const backWheel = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    backWheel.setAttribute("cx", "18");
+    backWheel.setAttribute("cy", "20");
+    backWheel.setAttribute("r", "1.25");
+    icon.append(path, frontWheel, backWheel);
+    button.append(label, icon);
+    return button;
+  };
+
+  const createPurchaseControls = product => {
+    if (product.store === "Vestua") return null;
+    const controls = document.createElement("div");
+    controls.className = "catalog-purchase-controls";
+
+    const quantityLabel = document.createElement("label");
+    quantityLabel.className = "catalog-purchase-field";
+    const quantityCaption = document.createElement("span");
+    quantityCaption.textContent = "Cantidad";
+    const quantityInput = document.createElement("input");
+    quantityInput.type = "number";
+    quantityInput.min = "1";
+    quantityInput.step = "1";
+    quantityInput.value = "1";
+    quantityInput.inputMode = "numeric";
+    quantityInput.dataset.catalogQuantity = "";
+    quantityLabel.append(quantityCaption, quantityInput);
+
+    const sizeLabel = document.createElement("label");
+    sizeLabel.className = "catalog-purchase-field";
+    const sizeCaption = document.createElement("span");
+    sizeCaption.textContent = "Talla a llevar";
+    sizeLabel.append(sizeCaption);
+    if (product.store === "Paris" && product.available_sizes.length) {
+      const sizeSelect = document.createElement("select");
+      sizeSelect.dataset.catalogSizeChoice = "";
+      sizeSelect.required = true;
+      const outOfStockSizes = new Set(
+        product.out_of_stock_sizes.map(normalizeSizeOption),
+      );
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Selecciona una talla";
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      sizeSelect.append(placeholder);
+      product.available_sizes.forEach(size => {
+        const option = document.createElement("option");
+        option.value = size;
+        option.textContent = size;
+        option.disabled = outOfStockSizes.has(normalizeSizeOption(size));
+        sizeSelect.append(option);
+      });
+      updateParisSizeSelect(sizeSelect);
+      sizeLabel.append(sizeSelect);
+    } else {
+      const sizeInput = document.createElement("input");
+      sizeInput.type = "text";
+      sizeInput.maxLength = 32;
+      sizeInput.autocomplete = "off";
+      sizeInput.placeholder = "Ej.: M";
+      sizeInput.required = true;
+      sizeInput.dataset.catalogSizeChoice = "";
+      sizeLabel.append(sizeInput);
+    }
+
+    controls.append(quantityLabel, sizeLabel);
+    return controls;
+  };
+
+  const updateFavoriteButtons = () => {
+    document.querySelectorAll("[data-favorite-toggle]").forEach(button => {
+      const card = button.closest("[data-catalog-card]");
+      const productUrl = button.dataset.productUrl
+        || card?.querySelector(".catalog-buy-link")?.href;
+      const productTitle = button.dataset.productTitle
+        || card?.querySelector(".catalog-item-info h3")?.textContent?.trim()
+        || "esta prenda";
+      if (!productUrl) return;
+      button.dataset.productUrl = productUrl;
+      button.dataset.productTitle = productTitle;
+      const isFavorite = favorites.some(
+        favorite => favorite.product_url === productUrl,
+      );
+      button.setAttribute("aria-pressed", String(isFavorite));
+      const label = isFavorite
+        ? `Quitar ${productTitle} de Favoritos`
+        : `Agregar ${productTitle} a Favoritos`;
+      button.setAttribute("aria-label", label);
+      button.title = label;
+      const hiddenLabel = button.querySelector(".visually-hidden");
+      if (hiddenLabel) hiddenLabel.textContent = label;
+    });
+  };
+
+  const renderFavorites = () => {
+    if (!favoritesList) return;
+    favoritesList.replaceChildren();
+    favorites.forEach(product => {
+      const card = document.createElement("article");
+      card.className = "catalog-item favorite-item";
+      card.dataset.catalogCard = "";
+      card.dataset.catalogSize = product.size || "No indicada";
+      card.dataset.catalogStore = product.store;
+      card.dataset.catalogBrand = product.brand;
+      card.dataset.catalogPrice = product.price_clp === null
+        ? ""
+        : String(product.price_clp);
+      card.dataset.catalogType = product.type;
+      card.dataset.catalogFitLabel = product.fit_label;
+      card.dataset.catalogFitBadge = product.fit_badge;
+      const media = document.createElement("div");
+      media.className = "catalog-product-media";
+      const link = document.createElement("a");
+      link.className = "catalog-product-link";
+      link.href = product.product_url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      const image = document.createElement("img");
+      image.className = "catalog-image";
+      image.src = product.image_url || "/assets/calce-isotipo.png";
+      image.alt = `Imagen referencial de ${product.title}`;
+      image.loading = "lazy";
+      link.append(image);
+      media.append(link, createHeartButton(product));
+
+      const selectionRow = document.createElement("div");
+      selectionRow.className = "catalog-card-selection-row";
+      const fitBadge = document.createElement("span");
+      fitBadge.className = `catalog-fit-badge ${product.fit_badge_class}`;
+      fitBadge.textContent = product.fit_badge || "Sin referencia de calce";
+      selectionRow.append(fitBadge);
+
+      const info = document.createElement("div");
+      info.className = "catalog-item-info";
+      const store = document.createElement("span");
+      store.className = "catalog-brand";
+      store.textContent = [product.store, product.brand, product.type]
+        .filter(Boolean)
+        .join(" · ");
+      const title = document.createElement("h3");
+      title.textContent = product.title;
+      const size = document.createElement("span");
+      size.className = "catalog-product-size";
+      size.textContent = `Talla publicada: ${product.size || "No indicada"}`;
+      const price = document.createElement("strong");
+      price.className = "catalog-price";
+      price.textContent = product.price_clp === null
+        ? "Precio no disponible"
+        : currency.format(product.price_clp);
+      const purchaseControls = createPurchaseControls(product);
+      const cartButton = createCartButton(product);
+      const storeLink = document.createElement("a");
+      storeLink.className = "catalog-buy-link";
+      storeLink.href = product.product_url;
+      storeLink.target = "_blank";
+      storeLink.rel = "noopener noreferrer";
+      storeLink.textContent = `Ver ficha en ${product.store || "la tienda"}`;
+      info.append(store, title);
+      if (product.store !== "Paris") info.append(size);
+      info.append(price);
+      if (purchaseControls) info.append(purchaseControls);
+      info.append(cartButton);
+      info.append(storeLink);
+      card.append(media, selectionRow, info);
+      favoritesList.append(card);
+    });
+    if (favoritesEmpty) favoritesEmpty.hidden = favorites.length > 0;
+    window.dispatchEvent(new CustomEvent("calce:catalog-cards-rendered"));
+  };
+
+  const saveFavorites = nextFavorites => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(nextFavorites));
+    } catch (error) {
+      reportStorageError("No se pudieron guardar tus Favoritos en este navegador.", error);
+      return false;
+    }
+    favorites = nextFavorites;
+    renderFavorites();
+    updateFavoriteButtons();
+    return true;
+  };
+
+  document.addEventListener("click", event => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest("[data-favorite-toggle]");
+    if (!button) return;
+    event.preventDefault();
+
+    const card = button.closest("[data-catalog-card]");
+    const productUrl = button.dataset.productUrl
+      || card?.querySelector(".catalog-buy-link")?.href;
+    const existingIndex = favorites.findIndex(
+      favorite => favorite.product_url === productUrl,
+    );
+    const product = existingIndex >= 0
+      ? favorites[existingIndex]
+      : (() => {
+        const sourceSizeSelect = card?.querySelector("select[data-catalog-size-choice]");
+        const sourceFitBadge = card?.querySelector(".catalog-fit-badge");
+        return normalizeProduct({
+          product_url: productUrl,
+          image_url: card?.querySelector(".catalog-image")?.src || "",
+          store: card?.dataset.catalogStore || "",
+          brand: card?.dataset.catalogBrand || "",
+          title: button.dataset.productTitle
+            || card?.querySelector(".catalog-item-info h3")?.textContent?.trim(),
+          size: card?.dataset.catalogSize || "",
+          type: card?.dataset.catalogType || "",
+          fit_label: card?.dataset.catalogFitLabel || "",
+          fit_badge: card?.dataset.catalogFitBadge || "",
+          fit_badge_class: ["tight", "loose", "partial"].find(
+            className => sourceFitBadge?.classList.contains(className),
+          ) || "partial",
+          available_sizes: sourceSizeSelect
+            ? Array.from(sourceSizeSelect.options, option => option.value).filter(Boolean)
+            : [],
+          out_of_stock_sizes: sourceSizeSelect
+            ? Array.from(sourceSizeSelect.options)
+              .filter(option => option.value.trim() && option.disabled)
+              .map(option => option.value)
+            : [],
+          price_clp: card?.dataset.catalogPrice
+            ? Number(card.dataset.catalogPrice)
+            : null,
+        });
+      })();
+    if (!product) {
+      setStatus("No se pudo identificar la prenda para guardarla en Favoritos.");
+      console.error("No se pudo crear el elemento de Favoritos.", productUrl);
+      return;
+    }
+    const nextFavorites = existingIndex >= 0
+      ? favorites.filter(favorite => favorite.product_url !== productUrl)
+      : [...favorites, product];
+    if (saveFavorites(nextFavorites)) {
+      setStatus(existingIndex >= 0
+        ? `${product.title} se quitó de Favoritos.`
+        : `${product.title} se agregó a Favoritos.`);
+    }
+  });
+
+  window.addEventListener("calce:catalog-cards-rendered", updateFavoriteButtons);
+  window.addEventListener("storage", event => {
+    if (event.key !== storageKey) return;
+    favorites = readFavorites();
+    renderFavorites();
+    updateFavoriteButtons();
+  });
+
+  renderFavorites();
+  updateFavoriteButtons();
+})();
 
 document.querySelectorAll(".product-image").forEach(image => {
   image.addEventListener("error", () => {
@@ -268,6 +1148,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const profileEmail = document.querySelector("[data-profile-email]");
     const profileEditLink = document.querySelector("[data-profile-edit]");
     const profileAccountLink = document.querySelector("[data-profile-account]");
+    const profileFavoritesLink = document.querySelector("[data-profile-favorites]");
     const profilePaymentLink = document.querySelector("[data-profile-payment]");
     const navAccountLinks = document.querySelector(".nav-account-links");
     const profileName = document.querySelector("[data-profile-name]");
@@ -380,6 +1261,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       signOutButton.hidden = !user;
       profileEditLink.hidden = !user;
       profileAccountLink.hidden = !user;
+      if (profileFavoritesLink) profileFavoritesLink.hidden = !user;
       profilePaymentLink.hidden = !user;
       profileEmail.hidden = !user;
       profileEmail.textContent = user?.email || "Cuenta activa";
@@ -1219,6 +2101,23 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const selectionBar = catalog.querySelector("[data-catalog-selection-bar]");
   const selectionStatus = catalog.querySelector("[data-catalog-selection-status]");
   const tryOnButton = catalog.querySelector("[data-catalog-try-on]");
+  const parisSizeDialog = catalog.querySelector("[data-catalog-paris-size-dialog]");
+  const parisSizeStatus = catalog.querySelector("[data-catalog-paris-size-status]");
+  const parisSizeSelectField = catalog.querySelector(
+    "[data-catalog-paris-size-select-field]",
+  );
+  const parisSizeSelect = catalog.querySelector("[data-catalog-paris-size-select]");
+  const parisSizeTextField = catalog.querySelector(
+    "[data-catalog-paris-size-text-field]",
+  );
+  const parisSizeTextInput = catalog.querySelector("[data-catalog-paris-size-text]");
+  const parisSizeConfirmButton = catalog.querySelector(
+    "[data-catalog-paris-size-confirm]",
+  );
+  const parisSizeCloseButton = catalog.querySelector("[data-catalog-paris-size-close]");
+  const parisSizeCancelButton = catalog.querySelector(
+    "[data-catalog-paris-size-cancel]",
+  );
   const pagination = catalog.querySelector("[data-catalog-pagination]");
   const previousPageButton = catalog.querySelector("[data-catalog-previous]");
   const nextPageButton = catalog.querySelector("[data-catalog-next]");
@@ -1247,6 +2146,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   let requestNumber = 0;
   let activeController;
   let searchTimer;
+  let pendingParisSizeSelection = null;
 
   const updateSelection = () => {
     const count = selectedCatalogGarments.size;
@@ -1292,12 +2192,155 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     });
   };
 
+  const persistCatalogSelection = (productUrl, previousProduct) => {
+    try {
+      sessionStorage.setItem(
+        catalogSelectionStorageKey,
+        JSON.stringify(Array.from(selectedCatalogGarments.values())),
+      );
+      return true;
+    } catch (error) {
+      if (previousProduct) {
+        selectedCatalogGarments.set(productUrl, previousProduct);
+      } else {
+        selectedCatalogGarments.delete(productUrl);
+      }
+      resultCount.textContent = "No se pudo guardar la selección para el Probador.";
+      console.error("No se pudo guardar la selección del catálogo.", error);
+      return false;
+    }
+  };
+
+  const selectedParisSize = () => {
+    if (!parisSizeSelectField?.hidden) {
+      const selectedOption = parisSizeSelect?.selectedOptions[0];
+      return selectedOption && !selectedOption.disabled
+        ? selectedOption.value.trim()
+        : "";
+    }
+    if (!parisSizeTextField?.hidden) return parisSizeTextInput?.value.trim() || "";
+    return "";
+  };
+  const updateParisSizeConfirmButton = () => {
+    if (parisSizeConfirmButton) {
+      parisSizeConfirmButton.disabled = !selectedParisSize();
+    }
+  };
+  const openParisSizeDialog = (checkbox, sizeInput, confirmSelection) => {
+    if (!parisSizeDialog || !parisSizeSelect || !parisSizeTextInput || !sizeInput) {
+      resultCount.textContent = "No se pudo abrir la selección de talla para París.";
+      return false;
+    }
+    const availableOptions = sizeInput.tagName === "SELECT"
+      ? Array.from(sizeInput.options).filter(option => option.value.trim())
+      : [];
+    const hasAvailableSizes = availableOptions.length > 0;
+    const hasInStockSizes = availableOptions.some(option => !option.disabled);
+    if (parisSizeSelectField) parisSizeSelectField.hidden = !hasAvailableSizes;
+    if (parisSizeTextField) parisSizeTextField.hidden = hasAvailableSizes;
+    parisSizeSelect.replaceChildren(
+      ...(hasAvailableSizes
+        ? Array.from(sizeInput.options, option => option.cloneNode(true))
+        : []),
+    );
+    parisSizeSelect.value = hasAvailableSizes
+      ? availableOptions.find(
+        option => option.value === sizeInput.value && !option.disabled,
+      )?.value || ""
+      : "";
+    parisSizeTextInput.value = hasAvailableSizes ? "" : sizeInput.value;
+    if (parisSizeStatus) {
+      parisSizeStatus.textContent = !hasAvailableSizes
+        ? "No hay tallas predefinidas; escribe la talla que quieres probarte."
+        : hasInStockSizes
+          ? ""
+          : "No hay tallas con stock disponibles.";
+    }
+    pendingParisSizeSelection = { checkbox, confirmSelection };
+    updateParisSizeConfirmButton();
+    parisSizeDialog.showModal();
+    (hasAvailableSizes ? parisSizeSelect : parisSizeTextInput).focus();
+    return true;
+  };
+  parisSizeSelect?.addEventListener("change", () => {
+    if (parisSizeStatus) parisSizeStatus.textContent = "";
+    updateParisSizeConfirmButton();
+  });
+  parisSizeTextInput?.addEventListener("input", updateParisSizeConfirmButton);
+  parisSizeConfirmButton?.addEventListener("click", () => {
+    const selectedSize = selectedParisSize();
+    if (!pendingParisSizeSelection) return;
+    if (!selectedSize) {
+      if (parisSizeStatus) parisSizeStatus.textContent = "Selecciona o escribe una talla.";
+      return;
+    }
+    const pendingSelection = pendingParisSizeSelection;
+    pendingParisSizeSelection = null;
+    pendingSelection.confirmSelection(selectedSize);
+    parisSizeDialog?.close();
+  });
+  parisSizeCloseButton?.addEventListener("click", () => parisSizeDialog?.close());
+  parisSizeCancelButton?.addEventListener("click", () => parisSizeDialog?.close());
+  parisSizeDialog?.addEventListener("close", () => {
+    if (pendingParisSizeSelection) {
+      pendingParisSizeSelection.checkbox.checked = false;
+      pendingParisSizeSelection = null;
+    }
+    if (parisSizeSelectField) parisSizeSelectField.hidden = true;
+    if (parisSizeTextField) parisSizeTextField.hidden = true;
+    if (parisSizeSelect) parisSizeSelect.replaceChildren();
+    if (parisSizeTextInput) parisSizeTextInput.value = "";
+    if (parisSizeStatus) parisSizeStatus.textContent = "";
+    if (parisSizeConfirmButton) parisSizeConfirmButton.disabled = true;
+  });
+  parisSizeDialog?.addEventListener("click", event => {
+    if (event.target === parisSizeDialog) parisSizeDialog.close();
+  });
+
   const bindCard = item => {
     const checkbox = item.querySelector("[data-catalog-select]");
     if (checkbox) {
       const productUrl = item.querySelector(".catalog-buy-link")?.href;
       const productName = item.querySelector(".catalog-item-info h3")?.textContent?.trim();
-      checkbox.checked = Boolean(productUrl && selectedCatalogGarments.has(productUrl));
+      const quantityInput = item.querySelector("[data-catalog-quantity]");
+      const sizeInput = item.querySelector("[data-catalog-size-choice]");
+      if (item.dataset.catalogStore === "Paris") updateParisSizeSelect(sizeInput);
+      const persistSelectedProduct = (selectedUrl, previousProduct, selectedSize) => {
+        const quantity = quantityInput ? Number(quantityInput.value) : 1;
+        selectedCatalogGarments.set(selectedUrl, {
+          product_url: selectedUrl,
+          image_url: item.querySelector(".catalog-image")?.src || "",
+          store: item.dataset.catalogStore || "",
+          brand: item.dataset.catalogBrand || "",
+          title: productName,
+          size: item.dataset.catalogSize || "",
+          selected_size: selectedSize,
+          quantity: Number.isSafeInteger(quantity) && quantity > 0
+            ? quantity
+            : 1,
+          price_clp: Number(item.dataset.catalogPrice) || null,
+          category: item.dataset.catalogTryOnCategory || "",
+        });
+        if (!persistCatalogSelection(selectedUrl, previousProduct)) {
+          checkbox.checked = Boolean(previousProduct);
+          updateSelection();
+          return false;
+        }
+        checkbox.checked = true;
+        checkbox.setAttribute("aria-label", `Quitar ${productName} del Probador`);
+        updateSelection();
+        return true;
+      };
+      const savedProduct = productUrl
+        ? selectedCatalogGarments.get(productUrl)
+        : null;
+      checkbox.checked = Boolean(savedProduct);
+      if (savedProduct) {
+        if (quantityInput) {
+          quantityInput.value = String(savedProduct.quantity || 1);
+        }
+        if (sizeInput) sizeInput.value = savedProduct.selected_size || "";
+      }
       if (productName) {
         checkbox.setAttribute(
           "aria-label",
@@ -1317,43 +2360,60 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
         const selectedUrl = productLink.href;
         const previousProduct = selectedCatalogGarments.get(selectedUrl);
         if (checkbox.checked) {
-          selectedCatalogGarments.set(selectedUrl, {
-            product_url: selectedUrl,
-            image_url: item.querySelector(".catalog-image")?.src || "",
-            store: item.dataset.catalogStore || "",
-            brand: item.dataset.catalogBrand || "",
-            title: productName,
-            size: item.dataset.catalogSize || "",
-            category: item.dataset.catalogTryOnCategory || "",
-          });
-        } else {
-          selectedCatalogGarments.delete(selectedUrl);
-        }
-
-        try {
-          sessionStorage.setItem(
-            catalogSelectionStorageKey,
-            JSON.stringify(Array.from(selectedCatalogGarments.values())),
-          );
-          checkbox.setAttribute(
-            "aria-label",
-            checkbox.checked
-              ? `Quitar ${productName} del Probador`
-              : `Seleccionar ${productName} para el Probador`,
-          );
-          updateSelection();
-        } catch (error) {
-          if (previousProduct) {
-            selectedCatalogGarments.set(selectedUrl, previousProduct);
-          } else {
-            selectedCatalogGarments.delete(selectedUrl);
+          if (item.dataset.catalogStore === "Paris") {
+            checkbox.checked = false;
+            openParisSizeDialog(
+              checkbox,
+              sizeInput,
+              selectedSize => {
+                if (sizeInput) sizeInput.value = selectedSize;
+                persistSelectedProduct(selectedUrl, previousProduct, selectedSize);
+              },
+            );
+            return;
           }
+          persistSelectedProduct(selectedUrl, previousProduct, sizeInput?.value.trim() || "");
+          return;
+        }
+        selectedCatalogGarments.delete(selectedUrl);
+        if (!persistCatalogSelection(selectedUrl, previousProduct)) {
           checkbox.checked = Boolean(previousProduct);
           updateSelection();
-          resultCount.textContent = "No se pudo guardar la selección para el Probador.";
-          console.error("No se pudo guardar la selección del catálogo.", error);
+          return;
         }
+        checkbox.setAttribute(
+          "aria-label",
+          checkbox.checked
+            ? `Quitar ${productName} del Probador`
+            : `Seleccionar ${productName} para el Probador`,
+        );
+        updateSelection();
       });
+
+      const persistPurchaseDetails = () => {
+        if (!checkbox.checked || !productUrl) return;
+        const previousProduct = selectedCatalogGarments.get(productUrl);
+        if (!previousProduct) return;
+        const quantity = quantityInput ? Number(quantityInput.value) : 1;
+        if (!Number.isSafeInteger(quantity) || quantity < 1) {
+          resultCount.textContent = "Indica una cantidad válida (mínimo 1).";
+          if (quantityInput) quantityInput.value = String(previousProduct.quantity || 1);
+          return;
+        }
+        selectedCatalogGarments.set(productUrl, {
+          ...previousProduct,
+          quantity,
+          selected_size: sizeInput?.value.trim() || "",
+        });
+        if (!persistCatalogSelection(productUrl, previousProduct)) {
+          if (quantityInput) {
+            quantityInput.value = String(previousProduct.quantity || 1);
+          }
+          if (sizeInput) sizeInput.value = previousProduct.selected_size || "";
+        }
+      };
+      quantityInput?.addEventListener("change", persistPurchaseDetails);
+      sizeInput?.addEventListener("change", persistPurchaseDetails);
     }
 
     const image = item.querySelector(".catalog-image");
@@ -1407,6 +2467,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       nextPageButton.disabled = currentPage >= data.pages - 1;
       pagination.hidden = data.pages <= 1;
       itemsContainer.querySelectorAll("[data-catalog-card]").forEach(bindCard);
+      window.dispatchEvent(new Event("calce:catalog-cards-rendered"));
       updateSelection();
     } catch (error) {
       if (error.name === "AbortError") return;
@@ -1473,6 +2534,24 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       document.getElementById("try-on-link")?.href || "/?view=try-on",
     );
   });
+  window.addEventListener("calce:catalog-selection-cleared", () => {
+    selectedCatalogGarments.clear();
+    itemsContainer.querySelectorAll("[data-catalog-select]").forEach(checkbox => {
+      checkbox.checked = false;
+      const productName = checkbox
+        .closest("[data-catalog-card]")
+        ?.querySelector(".catalog-item-info h3")
+        ?.textContent
+        ?.trim();
+      if (productName) {
+        checkbox.setAttribute(
+          "aria-label",
+          `Seleccionar ${productName} para el Probador`,
+        );
+      }
+    });
+    updateSelection();
+  });
   if (catalogViewActive) {
     searchInput.addEventListener("input", () => {
       updateHeading();
@@ -1519,6 +2598,36 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const tryOnProductSelect = tryOnPanel?.querySelector("[data-vton-product-select]");
   const tryOnProviderSelect = tryOnPanel?.querySelector("[data-vton-provider]");
   const tryOnProviderHelp = tryOnPanel?.querySelector("#vton-provider-help");
+  const tryOnGoCartLink = tryOnPanel?.querySelector("[data-vton-open-cart-choice]");
+  const tryOnCartChoiceDialog = tryOnPanel?.querySelector(
+    "[data-vton-cart-choice-dialog]",
+  );
+  const tryOnPaymentChoiceDialog = tryOnPanel?.querySelector(
+    "[data-vton-payment-choice-dialog]",
+  );
+  const tryOnPaymentYesButton = tryOnPanel?.querySelector(
+    "[data-vton-payment-yes]",
+  );
+  const tryOnPaymentNoButton = tryOnPanel?.querySelector(
+    "[data-vton-payment-no]",
+  );
+  const tryOnCatalogLink = document.getElementById("catalog-link");
+  const tryOnCartChoiceList = tryOnPanel?.querySelector(
+    "[data-vton-cart-choice-list]",
+  );
+  const tryOnCartChoiceEmpty = tryOnPanel?.querySelector(
+    "[data-vton-cart-choice-empty]",
+  );
+  const tryOnCartChoiceStatus = tryOnPanel?.querySelector(
+    "[data-vton-cart-choice-status]",
+  );
+  const tryOnCartChoiceConfirmButton = tryOnPanel?.querySelector(
+    "[data-vton-cart-choice-confirm]",
+  );
+  const tryOnCartChoiceCloseButton = tryOnPanel?.querySelector(
+    "[data-vton-cart-choice-close]",
+  );
+  const tryOnCartTotal = tryOnPanel?.querySelector("[data-vton-cart-total] strong");
   const tryOnGenderField = tryOnPanel?.querySelector("[data-vton-gender-field]");
   const tryOnGenderSelect = tryOnPanel?.querySelector("[data-vton-gender]");
   const tryOnProductList = tryOnPanel?.querySelector("[data-vton-product-list]");
@@ -1561,13 +2670,267 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   let selectedPhoto = null;
   let tryOnPhotoSavePromise = Promise.resolve(true);
   let cameraStream = null;
+  let tryOnPageInitialized = false;
   let tryOnPersonObjectUrl;
   let tryOnProductsController;
   let tryOnRequestController;
+  let tryOnCartProducts = [];
+  const selectedTryOnCartUrls = new Set();
+  let tryOnCartChoicesInitialized = false;
+  const tryOnCurrency = new Intl.NumberFormat("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
+  const isValidTryOnCartQuantity = product =>
+    Number.isSafeInteger(product.quantity) && product.quantity > 0;
 
   const selectedTryOnProductOptions = () => Array.from(
     tryOnProductSelect?.selectedOptions || [],
   ).filter(option => option.value);
+
+  const updateTryOnCartTotal = () => {
+    if (!tryOnCartTotal) return;
+    const selectedProducts = tryOnCartProducts.filter(
+      product => selectedTryOnCartUrls.has(product.product_url),
+    );
+    if (selectedProducts.some(
+      product => product.store === "Paris" && !isValidTryOnCartQuantity(product),
+    )) {
+      tryOnCartTotal.textContent = "Revisa cantidades";
+      return;
+    }
+    if (selectedProducts.some(
+      product => !Number.isFinite(product.price_clp) || product.price_clp < 0,
+    )) {
+      tryOnCartTotal.textContent = "No disponible";
+      return;
+    }
+    const priceTotal = selectedProducts.reduce(
+      (total, product) => total + product.price_clp * (product.quantity || 1),
+      0,
+    );
+    tryOnCartTotal.textContent = tryOnCurrency.format(priceTotal);
+  };
+
+  const updateTryOnCartLink = () => {
+    if (!tryOnGoCartLink) return;
+    const disabled = tryOnCartProducts.length === 0;
+    tryOnGoCartLink.setAttribute("aria-disabled", String(disabled));
+    tryOnGoCartLink.tabIndex = disabled ? -1 : 0;
+  };
+  updateTryOnCartLink();
+
+  const updateTryOnCartChoiceConfirmation = () => {
+    const selectedProducts = tryOnCartProducts.filter(
+      product => selectedTryOnCartUrls.has(product.product_url),
+    );
+    if (tryOnCartChoiceConfirmButton) {
+      tryOnCartChoiceConfirmButton.disabled = selectedProducts.length === 0
+        || selectedProducts.some(
+          product => product.store === "Paris" && !isValidTryOnCartQuantity(product),
+        );
+    }
+    updateTryOnCartTotal();
+  };
+
+  const renderTryOnCartChoices = () => {
+    if (!tryOnCartChoiceList) return;
+    tryOnCartChoiceList.replaceChildren();
+    tryOnCartProducts.forEach(product => {
+      const choice = document.createElement("div");
+      choice.className = "try-on-cart-choice";
+      choice.dataset.productUrl = product.product_url;
+      const selection = document.createElement("label");
+      selection.className = "try-on-cart-choice-selection";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = product.product_url;
+      checkbox.checked = selectedTryOnCartUrls.has(product.product_url);
+      checkbox.setAttribute(
+        "aria-label",
+        `Agregar ${product.title || "prenda"} al carrito`,
+      );
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          selectedTryOnCartUrls.add(product.product_url);
+        } else {
+          selectedTryOnCartUrls.delete(product.product_url);
+        }
+        if (tryOnCartChoiceStatus) tryOnCartChoiceStatus.textContent = "";
+        updateTryOnCartChoiceConfirmation();
+      });
+
+      const image = document.createElement("img");
+      image.alt = `Imagen referencial de ${product.title || "prenda"}`;
+      image.loading = "lazy";
+      image.src = typeof product.image_url === "string"
+        && product.image_url.startsWith("https://")
+        ? product.image_url
+        : "/assets/calce-isotipo.png";
+
+      const details = document.createElement("span");
+      details.className = "try-on-cart-choice-details";
+      const title = document.createElement("strong");
+      title.textContent = product.title || "Prenda";
+      const metadata = document.createElement("span");
+      const size = product.store === "Vestua"
+        ? product.size
+        : product.selected_size;
+      metadata.textContent = [
+        product.store,
+        product.brand,
+        size ? `Talla ${size}` : "",
+      ].filter(Boolean).join(" · ");
+      const price = document.createElement("span");
+      price.className = "try-on-cart-choice-price";
+      price.textContent = Number.isFinite(product.price_clp)
+        ? tryOnCurrency.format(product.price_clp)
+        : "Precio no disponible";
+      details.append(title, metadata, price);
+      selection.append(checkbox, image, details);
+      choice.append(selection);
+      choice.classList.add("has-quantity");
+      const quantityLabel = document.createElement("label");
+      quantityLabel.className = "try-on-cart-choice-quantity";
+      const quantityCaption = document.createElement("span");
+      quantityCaption.textContent = "Cantidad a llevar";
+      const quantityInput = document.createElement("input");
+      quantityInput.type = "number";
+      quantityInput.min = "1";
+      quantityInput.step = "1";
+      quantityInput.inputMode = "numeric";
+      quantityInput.setAttribute(
+        "aria-label",
+        `Cantidad a llevar de ${product.title || "la prenda"}`,
+      );
+      quantityInput.readOnly = product.store !== "Paris";
+      const quantity = isValidTryOnCartQuantity(product) ? product.quantity : 1;
+      product.quantity = quantity;
+      quantityInput.value = String(quantity);
+      if (product.store === "Paris") {
+        quantityInput.dataset.tryOnCartQuantity = "";
+        quantityInput.dataset.productUrl = product.product_url;
+        quantityInput.addEventListener("input", () => {
+          const nextQuantity = Number(quantityInput.value);
+          const isValid = Number.isSafeInteger(nextQuantity) && nextQuantity > 0;
+          quantityInput.setAttribute("aria-invalid", String(!isValid));
+          product.quantity = isValid ? nextQuantity : null;
+          if (tryOnCartChoiceStatus) {
+            tryOnCartChoiceStatus.textContent = isValid
+              ? ""
+              : "Indica una cantidad válida (mínimo 1) para las prendas de Paris.";
+          }
+          updateTryOnCartChoiceConfirmation();
+        });
+      }
+      quantityLabel.append(quantityCaption, quantityInput);
+      choice.append(quantityLabel);
+      tryOnCartChoiceList.append(choice);
+    });
+    if (tryOnCartChoiceEmpty) {
+      tryOnCartChoiceEmpty.hidden = tryOnCartProducts.length > 0;
+    }
+    if (tryOnCartChoiceStatus) tryOnCartChoiceStatus.textContent = "";
+    updateTryOnCartChoiceConfirmation();
+  };
+
+  tryOnGoCartLink?.addEventListener("click", event => {
+    event.preventDefault();
+    if (!tryOnCartProducts.length) return;
+    renderTryOnCartChoices();
+    if (tryOnCartChoiceDialog && !tryOnCartChoiceDialog.open) {
+      tryOnCartChoiceDialog.showModal();
+    }
+  });
+
+  tryOnCartChoiceCloseButton?.addEventListener(
+    "click",
+    () => tryOnCartChoiceDialog?.close(),
+  );
+  tryOnCartChoiceDialog?.addEventListener("click", event => {
+    if (event.target === tryOnCartChoiceDialog) tryOnCartChoiceDialog.close();
+  });
+  tryOnCartChoiceConfirmButton?.addEventListener("click", () => {
+    const selectedTryOnProducts = tryOnCartProducts.filter(
+      product => selectedTryOnCartUrls.has(product.product_url),
+    );
+    if (!selectedTryOnProducts.length) {
+      if (tryOnCartChoiceStatus) {
+        tryOnCartChoiceStatus.textContent = "Selecciona al menos una prenda.";
+      }
+      return;
+    }
+    const productMissingQuantity = selectedTryOnProducts.find(
+      product => product.store === "Paris" && !isValidTryOnCartQuantity(product),
+    );
+    if (productMissingQuantity) {
+      if (tryOnCartChoiceStatus) {
+        tryOnCartChoiceStatus.textContent =
+          `Indica una cantidad válida para ${productMissingQuantity.title || "la prenda"}.`;
+      }
+      tryOnCartChoiceList
+        ?.querySelectorAll("[data-try-on-cart-quantity]")
+        .forEach(input => {
+          if (input.dataset.productUrl === productMissingQuantity.product_url) {
+            input.focus();
+          }
+        });
+      return;
+    }
+    const selectedProducts = selectedTryOnProducts.map(product => ({
+      ...product,
+      size: product.store === "Vestua"
+        ? typeof product.size === "string" ? product.size : ""
+        : product.selected_size || "",
+      quantity: Number.isSafeInteger(product.quantity) && product.quantity > 0
+        ? product.quantity
+        : 1,
+    }));
+    const productMissingSize = selectedProducts.find(
+      product => product.store !== "Vestua" &&
+        !(typeof product.size === "string" && product.size.trim()),
+    );
+    if (productMissingSize) {
+      if (tryOnCartChoiceStatus) {
+        tryOnCartChoiceStatus.textContent =
+          `Indica la talla de ${productMissingSize.title || "la prenda"} en Catálogo.`;
+      }
+      return;
+    }
+    const detail = { products: selectedProducts };
+    window.dispatchEvent(new CustomEvent("calce:add-to-cart", { detail }));
+    if (detail.invalidCount) {
+      if (tryOnCartChoiceStatus) {
+        tryOnCartChoiceStatus.textContent =
+          "No se pudieron validar algunas prendas. Vuelve a seleccionarlas desde Catálogo.";
+      }
+      return;
+    }
+    if (!detail.saved) {
+      if (tryOnCartChoiceStatus) {
+        tryOnCartChoiceStatus.textContent =
+          "No se pudieron guardar las prendas en el carrito.";
+      }
+      return;
+    }
+    if (!clearSelectedCatalogGarments()) {
+      if (tryOnCartChoiceStatus) {
+        tryOnCartChoiceStatus.textContent =
+          "Las prendas se guardaron, pero no se pudo reiniciar la selección del Catálogo.";
+      }
+      return;
+    }
+    tryOnCartChoiceDialog?.close();
+    tryOnPaymentChoiceDialog?.showModal();
+  });
+
+  tryOnPaymentYesButton?.addEventListener("click", () => {
+    window.location.assign(tryOnGoCartLink?.href || "/?view=cart");
+  });
+  tryOnPaymentNoButton?.addEventListener("click", () => {
+    window.location.assign(tryOnCatalogLink?.href || "/?view=catalog");
+  });
 
   const setStatus = message => {
     status.textContent = message;
@@ -1598,30 +2961,41 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     }
   };
 
-  const hideTryOnGarmentTooltip = () => {
-    if (!tryOnGarmentTooltip || !tryOnTooltipImage || !tryOnTooltipTitle) return;
-    tryOnGarmentTooltip.hidden = true;
-    tryOnTooltipImage.removeAttribute("src");
-    tryOnTooltipTitle.textContent = "";
+  const hideTryOnGarmentTooltip = (
+    tooltip = tryOnGarmentTooltip,
+    image = tryOnTooltipImage,
+    titleElement = tryOnTooltipTitle,
+  ) => {
+    if (!tooltip || !image || !titleElement) return;
+    tooltip.hidden = true;
+    image.removeAttribute("src");
+    titleElement.textContent = "";
   };
 
-  const showTryOnGarmentTooltip = (button, x, y) => {
+  const showTryOnGarmentTooltip = (
+    button,
+    x,
+    y,
+    tooltip = tryOnGarmentTooltip,
+    image = tryOnTooltipImage,
+    titleElement = tryOnTooltipTitle,
+  ) => {
     const imageUrl = button.dataset.imageUrl;
     if (
       !imageUrl
-      || !tryOnGarmentTooltip
-      || !tryOnTooltipImage
-      || !tryOnTooltipTitle
+      || !tooltip
+      || !image
+      || !titleElement
     ) return;
 
     const title = button.dataset.title || button.textContent.trim();
-    tryOnTooltipImage.hidden = false;
-    tryOnTooltipImage.alt = title;
-    tryOnTooltipImage.src = imageUrl;
-    tryOnTooltipTitle.textContent = title;
-    tryOnGarmentTooltip.hidden = false;
+    image.hidden = false;
+    image.alt = title;
+    image.src = imageUrl;
+    titleElement.textContent = title;
+    tooltip.hidden = false;
 
-    const bounds = tryOnGarmentTooltip.getBoundingClientRect();
+    const bounds = tooltip.getBoundingClientRect();
     const left = Math.max(
       12,
       Math.min(x + 16, window.innerWidth - bounds.width - 12),
@@ -1630,9 +3004,20 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       12,
       Math.min(y + 16, window.innerHeight - bounds.height - 12),
     );
-    tryOnGarmentTooltip.style.left = `${left}px`;
-    tryOnGarmentTooltip.style.top = `${top}px`;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
   };
+
+  document.addEventListener("pointermove", event => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (
+      tryOnGarmentTooltip &&
+      !tryOnGarmentTooltip.hidden &&
+      !target?.closest(".try-on-product-row")
+    ) {
+      hideTryOnGarmentTooltip();
+    }
+  });
 
   const renderTryOnProductOptions = (catalogProducts, emptyMessage) => {
     hideTryOnGarmentTooltip();
@@ -1647,17 +3032,45 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       });
     });
     const products = Array.from(productsByUrl.values());
+    tryOnCartProducts = products.filter(product => product.product_url);
+    updateTryOnCartLink();
+    const availableCartUrls = new Set(
+      tryOnCartProducts.map(product => product.product_url),
+    );
+    selectedTryOnCartUrls.forEach(productUrl => {
+      if (!availableCartUrls.has(productUrl)) selectedTryOnCartUrls.delete(productUrl);
+    });
+    if (!tryOnCartChoicesInitialized) {
+      tryOnCartProducts.forEach(product => {
+        selectedTryOnCartUrls.add(product.product_url);
+      });
+      tryOnCartChoicesInitialized = true;
+    }
+    updateTryOnCartTotal();
+    if (tryOnCartChoiceDialog?.open) renderTryOnCartChoices();
     const selectedProductUrls = new Set(
       selectedTryOnProductOptions().map(option => option.value),
     );
     const groups = new Map([
       ["upper_body", { label: "Prendas superiores", options: [], buttons: [] }],
       ["lower_body", { label: "Prendas inferiores", options: [], buttons: [] }],
+      ["unsupported", {
+        label: "No disponibles para prueba virtual",
+        options: [],
+        buttons: [],
+      }],
     ]);
     products.forEach(product => {
-      if (!product.product_url || product.category === "excluded") return;
+      if (!product.product_url) return;
+      const supportsTryOn = ["upper_body", "lower_body", "dresses"]
+        .includes(product.category);
+      const groupCategory = product.category === "dresses"
+        ? "upper_body"
+        : ["upper_body", "lower_body"].includes(product.category)
+          ? product.category
+          : "unsupported";
       const group = groups.get(
-        product.category === "dresses" ? "upper_body" : product.category,
+        groupCategory,
       );
       if (!group) return;
       const option = document.createElement("option");
@@ -1668,18 +3081,29 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
         product.title,
         product.size ? `Talla ${product.size}` : "",
       ].filter(Boolean).join(" · ");
+      option.disabled = !supportsTryOn;
       if (product.image_url) option.dataset.imageUrl = product.image_url;
       if (product.title) option.dataset.title = product.title;
       if (product.category) option.dataset.category = product.category;
       option.selected = selectedProductUrls.has(product.product_url);
       group.options.push(option);
 
+      const row = document.createElement("div");
+      row.className = "try-on-product-row";
+      row.dataset.imageUrl = product.image_url || "";
+      row.dataset.title = product.title || "";
       const button = document.createElement("button");
       button.type = "button";
       button.className = "try-on-product-option";
       button.dataset.vtonProductOption = "";
       button.dataset.productUrl = product.product_url;
-      button.textContent = option.textContent;
+      button.textContent = supportsTryOn
+        ? option.textContent
+        : `${option.textContent} · No disponible para prueba`;
+      button.disabled = !supportsTryOn;
+      if (!supportsTryOn) {
+        button.title = "Esta categoría no es compatible con los proveedores del Probador.";
+      }
       button.setAttribute(
         "aria-pressed",
         String(selectedProductUrls.has(product.product_url)),
@@ -1687,6 +3111,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       if (product.image_url) button.dataset.imageUrl = product.image_url;
       if (product.title) button.dataset.title = product.title;
       if (product.category) button.dataset.category = product.category;
+      button.setAttribute("aria-describedby", "vton-garment-tooltip");
       button.addEventListener("click", () => {
         const selectedOption = Array.from(tryOnProductSelect.options)
           .find(candidate => candidate.value === product.product_url);
@@ -1728,19 +3153,21 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
           });
         tryOnProductSelect.dispatchEvent(new Event("change", { bubbles: true }));
       });
-      button.addEventListener("pointerenter", event => {
-        showTryOnGarmentTooltip(button, event.clientX, event.clientY);
-      });
-      button.addEventListener("pointermove", event => {
-        showTryOnGarmentTooltip(button, event.clientX, event.clientY);
-      });
-      button.addEventListener("pointerleave", hideTryOnGarmentTooltip);
       button.addEventListener("focus", () => {
         const bounds = button.getBoundingClientRect();
-        showTryOnGarmentTooltip(button, bounds.right, bounds.top);
+        showTryOnGarmentTooltip(row, bounds.right, bounds.top);
       });
       button.addEventListener("blur", hideTryOnGarmentTooltip);
-      group.buttons.push(button);
+
+      row.addEventListener("pointerenter", event => {
+        showTryOnGarmentTooltip(row, event.clientX, event.clientY);
+      });
+      row.addEventListener("pointermove", event => {
+        showTryOnGarmentTooltip(row, event.clientX, event.clientY);
+      });
+      row.addEventListener("pointerleave", hideTryOnGarmentTooltip);
+      row.append(button);
+      group.buttons.push(row);
     });
     const productCount = Array.from(groups.values()).reduce(
       (count, group) => count + group.options.length,
@@ -1766,8 +3193,16 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
         `[data-vton-product-options="${category}"]`,
       );
       if (!optionsContainer) return;
+      if (category === "unsupported") {
+        optionsContainer.closest("[data-vton-product-group]").hidden =
+          group.buttons.length === 0;
+      }
       if (group.buttons.length) {
         optionsContainer.replaceChildren(...group.buttons);
+        return;
+      }
+      if (category === "unsupported") {
+        optionsContainer.replaceChildren();
         return;
       }
       const empty = document.createElement("p");
@@ -1784,8 +3219,10 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
 
   const loadInitialTryOnProducts = async () => {
     const savedProducts = readSelectedCatalogGarments();
-    const productsWithoutCategory = savedProducts.filter(product => !product.category);
-    if (!productsWithoutCategory.length) {
+    const productsNeedingMetadata = savedProducts.filter(
+      product => !product.category || !Number.isFinite(product.price_clp),
+    );
+    if (!productsNeedingMetadata.length) {
       renderTryOnProductOptions(
         [],
         "Selecciona una prenda desde Catálogo",
@@ -1796,7 +3233,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     tryOnProductsController?.abort();
     tryOnProductsController = new AbortController();
     const params = new URLSearchParams();
-    productsWithoutCategory.slice(0, 24).forEach(product => {
+    productsNeedingMetadata.slice(0, 24).forEach(product => {
       params.append("product_url", product.product_url);
     });
     try {
@@ -1828,10 +3265,6 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     window.location.assign(tryOnLink.href);
   });
 
-  if (tryOnPagePanel && !tryOnPagePanel.hidden) {
-    syncTryOnPhoto();
-  }
-
   tryOnProductSelect?.addEventListener("change", () => {
     if (tryOnGenerateButton) {
       tryOnGenerateButton.disabled = (
@@ -1841,9 +3274,16 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     tryOnResult.hidden = true;
   });
 
-  if (tryOnPagePanel && !tryOnPagePanel.hidden) {
-    loadInitialTryOnProducts();
-  }
+  const initializeTryOnPage = () => {
+    if (!tryOnPagePanel || tryOnPagePanel.hidden || tryOnPageInitialized) return;
+    tryOnPageInitialized = true;
+    syncTryOnPhoto();
+    void loadInitialTryOnProducts();
+  };
+  window.addEventListener("calce:protected-page-visible", event => {
+    if (event.detail?.view === "try-on") initializeTryOnPage();
+  });
+  initializeTryOnPage();
 
   const fileAsBase64 = file => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -2382,17 +3822,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   };
 
   const updateSizeSummary = () => {
-    const enteredMeasures = [
-      ["busto", "bust", "Busto", "Bust"],
-      ["cintura", "waist", "Cintura", "Waist"],
-      ["cadera", "hip", "Cadera", "Hip"],
-    ].flatMap(([measure, fieldName, label, rangeKey]) => {
-      const field = wizardForm.querySelector(`[name="${fieldName}"]`);
-      const value = Number.parseFloat(field?.value.replace(",", ".") ?? "");
-      return Number.isFinite(value) && value > 0
-        ? [{ measure, value, label, rangeKey }]
-        : [];
-    });
+    const enteredMeasures = readEnteredSizeMeasures();
 
     sizeSummaryMeasures.replaceChildren(...enteredMeasures.map(({ label, value }) => {
       const item = document.createElement("li");
@@ -2408,36 +3838,16 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       return;
     }
 
-    const sizes = Array.from(document.querySelectorAll("[data-standard-size]"));
-    const rangesFor = size => enteredMeasures.map(({ value, rangeKey }) => {
-      const minimum = Number(size.dataset[`size${rangeKey}Min`]);
-      const maximum = Number(size.dataset[`size${rangeKey}Max`]);
-      return {
-        compatible: value >= minimum && value <= maximum,
-        distance: Math.max(minimum - value, value - maximum, 0),
-      };
-    });
-    const exactSizes = sizes.filter(size => rangesFor(size).every(range => range.compatible));
-    const closestSizes = exactSizes.length
-      ? exactSizes
-      : sizes.filter(size => {
-        const distance = rangesFor(size).reduce((total, range) => total + range.distance, 0);
-        const minimumDistance = Math.min(
-          ...sizes.map(candidate => rangesFor(candidate)
-            .reduce((total, range) => total + range.distance, 0)),
-        );
-        return Math.abs(distance - minimumDistance) < 1e-9;
-      });
-
-    if (!closestSizes.length) {
+    const recommendation = getParisSizeFitContext(enteredMeasures).recommendation;
+    if (!recommendation.sizes.length) {
       sizeSummaryStatus.textContent = "No se pudieron estimar tallas con estas medidas.";
       return;
     }
 
-    sizeSummaryStatus.textContent = exactSizes.length
+    sizeSummaryStatus.textContent = recommendation.exactMatch
       ? "Tallas compatibles con las medidas ingresadas:"
       : "Tallas más cercanas; tus medidas no coinciden todas con un mismo rango:";
-    closestSizes.forEach(sizeData => {
+    recommendation.sizes.forEach(sizeData => {
       const size = document.createElement("span");
       size.className = "wizard-summary-size";
       size.textContent = [
