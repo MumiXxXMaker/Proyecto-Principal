@@ -1245,6 +1245,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const paymentEmptyMessage = document.querySelector("[data-payment-empty]");
     const paymentStatus = document.querySelector("[data-payment-status]");
     const paymentDialog = document.querySelector("[data-payment-dialog]");
+    let paymentDialogOpenedFromCheckout = false;
     const paymentForm = document.querySelector("[data-payment-form]");
     const paymentCardNumberInput = document.getElementById("payment-card-number");
     const paymentExpirationInput = document.getElementById("payment-card-expiration");
@@ -1263,6 +1264,9 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const checkoutForm = document.querySelector("[data-checkout-form]");
     const checkoutPaymentSelect = document.querySelector(
       "[data-checkout-payment-select]",
+    );
+    const checkoutAddPaymentButton = document.querySelector(
+      "[data-checkout-payment-add]",
     );
     const checkoutPaymentHint = document.querySelector(
       "[data-checkout-payment-hint]",
@@ -1400,7 +1404,10 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       }
       return methods;
     };
-    const renderCheckoutPaymentMethods = user => {
+    const renderCheckoutPaymentMethods = (user, preferredMethodId = "") => {
+      if (checkoutAddPaymentButton) {
+        checkoutAddPaymentButton.disabled = !user?.id;
+      }
       if (!checkoutPaymentSelect) return;
       checkoutPaymentSelect.replaceChildren();
       const emptyOption = document.createElement("option");
@@ -1425,7 +1432,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         if (!methods.length) {
           if (checkoutPaymentHint) {
             checkoutPaymentHint.textContent =
-              "No hay tarjetas guardadas en esta cuenta. Agrega una desde Forma de Pago.";
+              "No hay tarjetas guardadas. Añade una aquí o desde Forma de Pago.";
           }
           if (checkoutManagePaymentsLink) checkoutManagePaymentsLink.hidden = false;
           return;
@@ -1441,7 +1448,9 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         });
         checkoutPaymentSelect.disabled = false;
         checkoutPaymentSelect.value =
-          methods.find(method => method.isDefault)?.id || "";
+          methods.find(method => method.id === preferredMethodId)?.id
+          || methods.find(method => method.isDefault)?.id
+          || "";
         if (checkoutPaymentHint) {
           checkoutPaymentHint.textContent =
             "Solo se muestra la marca, los últimos cuatro dígitos y el nombre de la tarjeta.";
@@ -1841,7 +1850,10 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       paymentForm?.reset();
       updatePaymentCardPreview();
     };
-    paymentDialog?.addEventListener("close", clearPaymentForm);
+    paymentDialog?.addEventListener("close", () => {
+      clearPaymentForm();
+      paymentDialogOpenedFromCheckout = false;
+    });
     paymentCardNumberInput?.addEventListener("input", () => {
       formatPaymentCardNumberInput(paymentCardNumberInput);
       updatePaymentCardPreview();
@@ -1999,20 +2011,32 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         console.error("No se pudieron cargar los métodos de pago locales.", error);
       }
     };
-    paymentAddButton?.addEventListener("click", () => {
+    const openPaymentDialog = openedFromCheckout => {
       if (!signedInUser?.id || !paymentDialog || !paymentForm) {
-        if (paymentStatus) paymentStatus.textContent = "Inicia sesión para administrar métodos locales.";
+        const status = openedFromCheckout ? checkoutPaymentHint : paymentStatus;
+        if (status) status.textContent = "Inicia sesión para administrar métodos locales.";
         return;
       }
+      paymentDialogOpenedFromCheckout = openedFromCheckout;
+      const status = openedFromCheckout ? checkoutPaymentHint : paymentStatus;
+      if (status) status.textContent = "";
       clearPaymentForm();
       paymentDialog.showModal();
       paymentCardNumberInput?.focus();
+    };
+    paymentAddButton?.addEventListener("click", () => {
+      openPaymentDialog(false);
+    });
+    checkoutAddPaymentButton?.addEventListener("click", () => {
+      openPaymentDialog(true);
     });
     paymentCancelButton?.addEventListener("click", () => paymentDialog?.close());
     paymentForm?.addEventListener("submit", event => {
       event.preventDefault();
+      const openedFromCheckout = paymentDialogOpenedFromCheckout;
+      const status = openedFromCheckout ? checkoutPaymentHint : paymentStatus;
       if (!signedInUser?.id) {
-        if (paymentStatus) paymentStatus.textContent = "Inicia sesión para guardar métodos locales.";
+        if (status) status.textContent = "Inicia sesión para guardar métodos locales.";
         if (paymentDialog?.open) paymentDialog.close();
         else clearPaymentForm();
         return;
@@ -2028,8 +2052,9 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       }
       try {
         const methods = readPaymentMethods(signedInUser);
+        const paymentMethodId = crypto.randomUUID();
         methods.push({
-          id: crypto.randomUUID(),
+          id: paymentMethodId,
           brand,
           lastFour: cardNumber.slice(-4),
           cardholderName,
@@ -2037,14 +2062,18 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         });
         savePaymentMethods(signedInUser, methods);
         renderPaymentMethods(signedInUser);
-        renderCheckoutPaymentMethods(signedInUser);
+        renderCheckoutPaymentMethods(
+          signedInUser,
+          openedFromCheckout ? paymentMethodId : "",
+        );
         if (paymentDialog?.open) paymentDialog.close();
         else clearPaymentForm();
-        if (paymentStatus) {
-          paymentStatus.textContent = "Tarjeta de demostración guardada: solo se conservan la marca, el nombre y los últimos cuatro dígitos.";
+        if (status) {
+          status.textContent =
+            "Tarjeta de demostración guardada: solo se conservan la marca, el nombre y los últimos cuatro dígitos.";
         }
       } catch (error) {
-        if (paymentStatus) paymentStatus.textContent = `No se pudo guardar el método local: ${error.message}`;
+        if (status) status.textContent = `No se pudo guardar el método local: ${error.message}`;
         console.error("No se pudo guardar el método de pago local.", error);
         if (paymentDialog?.open) paymentDialog.close();
         else clearPaymentForm();

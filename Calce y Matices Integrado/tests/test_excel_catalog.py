@@ -1194,6 +1194,13 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertIn('data-vton-payment-yes>Sí</button>', try_on_page)
         self.assertIn('data-vton-payment-no>No</button>', try_on_page)
+        self.assertIn("gap: 3mm;", styles)
+        self.assertIn(
+            ".try-on-payment-choice-actions .matices-button {\n"
+            "  display: inline-flex;\n"
+            "  flex: 1 1 0;",
+            styles,
+        )
         self.assertNotIn("data-vton-cart-choice-tooltip", try_on_page)
         self.assertNotIn("try-on-cart-checkbox", app_script)
         self.assertIn("updateTryOnCartTotal", app_script)
@@ -1540,12 +1547,28 @@ class ExcelCatalogTests(unittest.TestCase):
         ):
             self.assertIn(f'id="{field_id}"', checkout_page)
         self.assertIn('data-checkout-payment-select required', checkout_page)
+        self.assertIn(
+            'data-checkout-payment-add disabled>Añadir tarjeta</button>',
+            checkout_page,
+        )
+        self.assertGreater(
+            checkout_page.index('<dialog class="profile-payment-dialog"'),
+            checkout_page.index("</main>"),
+        )
+        self.assertIn('data-payment-form autocomplete="off"', checkout_page)
+        self.assertIn("no se envían ni se guardan", checkout_page)
         self.assertIn('data-checkout-address-select', checkout_page)
         self.assertIn('data-checkout-address-manage', checkout_page)
         self.assertIn('data-checkout-form', checkout_page)
         self.assertIn("return_view=checkout", checkout_page)
         checkout_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn("renderCheckoutPaymentMethods", checkout_script)
+        self.assertIn(
+            'checkoutAddPaymentButton?.addEventListener("click"',
+            checkout_script,
+        )
+        self.assertIn("openPaymentDialog(true);", checkout_script)
+        self.assertIn('openedFromCheckout ? paymentMethodId : ""', checkout_script)
         self.assertIn('checkoutForm?.addEventListener("submit"', checkout_script)
         home_navigation = home_page.split(
             '<nav class="page-tabs"', 1

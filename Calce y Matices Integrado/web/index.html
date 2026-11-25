@@ -8,7 +8,7 @@
   <meta name="supabase-publishable-key" content="{supabase_publishable_key}">
   <title>Calce Wardrobe</title>
   <link rel="icon" type="image/png" href="/assets/calce-isotipo.png">
-  <link rel="stylesheet" href="/styles.css?v=tu-calce-headings-1">
+  <link rel="stylesheet" href="/styles.css?v=checkout-payment-controls-1">
 </head>
 <body>
   <header><div class="wrap nav">
@@ -379,6 +379,8 @@
               data-checkout-payment-select required>
               <option value="">Cargando tarjetas guardadas…</option>
             </select>
+            <button class="matices-button matices-button-primary checkout-add-payment-button"
+              type="button" data-checkout-payment-add disabled>Añadir tarjeta</button>
             <p class="checkout-payment-hint" data-checkout-payment-hint
               role="status" aria-live="polite"></p>
             <a class="checkout-payment-link" data-checkout-sign-in
@@ -505,11 +507,6 @@
           aria-labelledby="profile-tab-payment" tabindex="0"
           data-profile-tab-panel="payment" hidden>
           <h2 id="profile-payment-title">Forma de Pago</h2>
-          <p class="profile-payment-notice">
-            Demo local, sin cargos. Usa solo datos de prueba: el número, vencimiento y CVV
-            no se envían ni se guardan. Al cerrar el formulario se descartan; solo se
-            conserva la marca, los últimos cuatro dígitos y el nombre en este navegador.
-          </p>
           <button class="matices-button matices-button-primary" type="button"
             data-payment-add>Añadir nueva tarjeta</button>
           <p class="profile-payment-empty" data-payment-empty hidden>
@@ -518,66 +515,6 @@
             aria-label="Tarjetas guardadas para demostración"></ul>
           <p class="profile-payment-status" data-payment-status role="status"
             aria-live="polite"></p>
-          <dialog class="profile-payment-dialog" data-payment-dialog
-            aria-labelledby="profile-payment-form-title">
-            <form class="profile-payment-form" data-payment-form autocomplete="off">
-              <h3 id="profile-payment-form-title">Añadir nueva tarjeta</h3>
-              <div class="profile-payment-entry">
-                <div class="profile-payment-card-preview"
-                  aria-label="Vista previa de la tarjeta">
-                  <div class="profile-payment-card-preview-top">
-                    <span class="profile-payment-card-chip" aria-hidden="true"></span>
-                    <strong data-payment-preview-brand>Tarjeta</strong>
-                  </div>
-                  <strong class="profile-payment-preview-number"
-                    data-payment-preview-number>**** **** **** ****</strong>
-                  <div class="profile-payment-preview-footer">
-                    <span class="profile-payment-preview-holder"
-                      data-payment-preview-holder>NOMBRE EN LA TARJETA</span>
-                    <span class="profile-payment-preview-expiration">
-                      <span>Vencimiento</span>
-                      <strong data-payment-preview-expiration>MM/AA</strong>
-                    </span>
-                  </div>
-                </div>
-                <div class="profile-payment-fields">
-                  <label for="payment-card-number">Número
-                    <input id="payment-card-number" type="text" inputmode="numeric"
-                      pattern="[0-9]{{4}} [0-9]{{4}} [0-9]{{4}} [0-9]{{4}}"
-                      maxlength="19" autocomplete="off"
-                      placeholder="0000 0000 0000 0000" required>
-                  </label>
-                  <p class="profile-payment-detected">Tipo detectado:
-                    <strong data-payment-detected-brand aria-live="polite">
-                      Se detecta al ingresar el número</strong>
-                  </p>
-                  <div class="profile-payment-fields-row">
-                    <label for="payment-card-expiration">Vencimiento
-                      <input id="payment-card-expiration" type="text" inputmode="numeric"
-                        pattern="(0[1-9]|1[0-2])/[0-9]{{2}}" maxlength="5"
-                        autocomplete="off" placeholder="MM/AA" required>
-                    </label>
-                    <label for="payment-card-cvv">Código de Seguridad
-                      <input id="payment-card-cvv" type="text" inputmode="numeric"
-                        pattern="[0-9]{{3}}" maxlength="3" autocomplete="off"
-                        placeholder="CVV" required>
-                    </label>
-                  </div>
-                  <label for="payment-cardholder-name">Nombre en la tarjeta
-                    <input id="payment-cardholder-name" type="text" maxlength="80"
-                      autocomplete="off" placeholder="Nombre como aparece en la tarjeta"
-                      required>
-                  </label>
-                </div>
-              </div>
-              <div class="profile-payment-actions">
-                <button class="matices-button" type="button"
-                  data-payment-cancel>Cancelar</button>
-                <button class="matices-button matices-button-primary" type="submit">
-                  Guardar tarjeta</button>
-              </div>
-            </form>
-          </dialog>
         </section>
         <section id="profile-address" class="profile-card" role="tabpanel"
           aria-labelledby="profile-tab-address" tabindex="0"
@@ -643,6 +580,69 @@
       </div>
     </section>
   </div></main>
-  <script src="/app.js?v=catalog-try-on-button-1" defer></script>
+  <dialog class="profile-payment-dialog" data-payment-dialog
+    aria-labelledby="profile-payment-form-title">
+    <p class="profile-payment-notice">
+      Demo local, sin cargos. Usa solo datos de prueba: el número, vencimiento y CVV
+      no se envían ni se guardan. Al cerrar el formulario se descartan; solo se
+      conserva la marca, los últimos cuatro dígitos y el nombre en este navegador.
+    </p>
+    <form class="profile-payment-form" data-payment-form autocomplete="off">
+      <h3 id="profile-payment-form-title">Añadir nueva tarjeta</h3>
+      <div class="profile-payment-entry">
+        <div class="profile-payment-card-preview" aria-label="Vista previa de la tarjeta">
+          <div class="profile-payment-card-preview-top">
+            <span class="profile-payment-card-chip" aria-hidden="true"></span>
+            <strong data-payment-preview-brand>Tarjeta</strong>
+          </div>
+          <strong class="profile-payment-preview-number" data-payment-preview-number>
+            **** **** **** ****</strong>
+          <div class="profile-payment-preview-footer">
+            <span class="profile-payment-preview-holder" data-payment-preview-holder>
+              NOMBRE EN LA TARJETA</span>
+            <span class="profile-payment-preview-expiration">
+              <span>Vencimiento</span>
+              <strong data-payment-preview-expiration>MM/AA</strong>
+            </span>
+          </div>
+        </div>
+        <div class="profile-payment-fields">
+          <label for="payment-card-number">Número
+            <input id="payment-card-number" type="text" inputmode="numeric"
+              pattern="[0-9]{{4}} [0-9]{{4}} [0-9]{{4}} [0-9]{{4}}"
+              maxlength="19" autocomplete="off"
+              placeholder="0000 0000 0000 0000" required>
+          </label>
+          <p class="profile-payment-detected">Tipo detectado:
+            <strong data-payment-detected-brand aria-live="polite">
+              Se detecta al ingresar el número</strong>
+          </p>
+          <div class="profile-payment-fields-row">
+            <label for="payment-card-expiration">Vencimiento
+              <input id="payment-card-expiration" type="text" inputmode="numeric"
+                pattern="(0[1-9]|1[0-2])/[0-9]{{2}}" maxlength="5"
+                autocomplete="off" placeholder="MM/AA" required>
+            </label>
+            <label for="payment-card-cvv">Código de Seguridad
+              <input id="payment-card-cvv" type="text" inputmode="numeric"
+                pattern="[0-9]{{3}}" maxlength="3" autocomplete="off"
+                placeholder="CVV" required>
+            </label>
+          </div>
+          <label for="payment-cardholder-name">Nombre en la tarjeta
+            <input id="payment-cardholder-name" type="text" maxlength="80"
+              autocomplete="off" placeholder="Nombre como aparece en la tarjeta"
+              required>
+          </label>
+        </div>
+      </div>
+      <div class="profile-payment-actions">
+        <button class="matices-button" type="button" data-payment-cancel>Cancelar</button>
+        <button class="matices-button matices-button-primary" type="submit">
+          Guardar tarjeta</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/app.js?v=checkout-payment-controls-1" defer></script>
 </body>
 </html>

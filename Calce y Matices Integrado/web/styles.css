@@ -1185,12 +1185,12 @@ input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rg
 }
 .try-on-payment-choice-actions {
   display: flex;
-  width: min(343px, 100%);
-  justify-content: space-between;
+  width: 100%;
+  gap: 3mm;
 }
 .try-on-payment-choice-actions .matices-button {
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 1 1 0;
   min-width: 0;
   max-width: none;
   min-height: 70px;
@@ -1484,6 +1484,8 @@ input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rg
   text-decoration: underline;
 }
 .checkout-payment-link[hidden] { display: none; }
+.checkout-add-payment-button { width: 100%; min-height: 42px; margin-top: 10px; }
+.checkout-add-payment-button:disabled { cursor: not-allowed; opacity: .55; }
 .checkout-actions { display: grid; gap: 9px; margin-top: 18px; }
 .checkout-actions > a {
   display: flex;
