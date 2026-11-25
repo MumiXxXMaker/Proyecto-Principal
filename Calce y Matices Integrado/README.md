@@ -16,8 +16,8 @@ conserva la guía para foto, medidas y recomendaciones de calce.
    recomendada con una explicación orientativa. Si activas **Recuérdame**, la
    foto se conserva en este navegador; con una sesión iniciada también se guarda
    en el almacenamiento privado de tu cuenta. Para usar el **Probador** tras ir
-   al catálogo, la foto también se conserva temporalmente en este navegador por
-   hasta una hora y se elimina al quitarla.
+   al catálogo, la foto se restaura desde el almacenamiento temporal de este
+   navegador, donde se conserva por hasta una hora y se elimina al quitarla.
 2. Ingresa busto, cintura y cadera, y elige tu preferencia de calce y las
    prendas que quieres explorar. Las recomendaciones se calculan con tus
    medidas y el calce elegido.
@@ -27,9 +27,12 @@ conserva la guía para foto, medidas y recomendaciones de calce.
    símbolo de carrito en cada prenda para agregarla sin salir del catálogo.
    También puedes indicar la cantidad y talla que llevarás; estos campos no
    aparecen para Vestua, donde se conserva la talla publicada y se agrega una
-   sola unidad. La app
-   todavía no genera órdenes ni procesa pagos, así que cada compra debe
-   completarse directamente en la tienda de origen.
+   sola unidad. **Confirmar Pago** abre un checkout de demostración para ingresar
+   una dirección y seleccionar una tarjeta guardada. En **Mi Perfil → Dirección**
+   puedes guardar, editar y eliminar varias direcciones privadas de tu cuenta y
+   reutilizarlas en el checkout. Las direcciones escritas solo durante el checkout
+   no se guardan automáticamente. No se generan órdenes ni se procesan pagos;
+   cada compra debe completarse directamente en la tienda de origen.
    Usa el corazón en la esquina inferior izquierda de una prenda para guardarla
    en **Favoritos**; encontrarás esa lista en el menú de usuario. Los favoritos
    se conservan en el almacenamiento local de este navegador.
@@ -57,6 +60,11 @@ python3 app.py
 Abre <http://127.0.0.1:4173/>. También puedes iniciar con `npm start` después
 de instalar las dependencias de Python. Para detener el servidor, presiona
 `Ctrl+C` en la terminal.
+
+La interfaz aplica una escala visual global de 150%. Esta escala se combina con
+el zoom del navegador; por ejemplo, al 75% el tamaño efectivo equivale al 112,5%.
+El fondo claro cubre también el lienzo HTML para evitar franjas negras fuera del
+contenido al ampliar o reducir la ventana.
 
 El acceso a la cámara requiere permiso del navegador y un contexto seguro:
 usa `localhost` en este equipo o sirve la aplicación mediante HTTPS.
@@ -149,10 +157,22 @@ en Supabase, no en el disco temporal de Render.
 ## Conexión con Supabase
 
 La app permite crear cuentas con nombre y apellido, iniciar sesión y editar en
-**Datos de Cuenta** el nombre, apellido, teléfono y medidas. Las medidas guardadas
-en el perfil se sincronizan con Tu Calce. El teléfono se guarda como `+56 9 XXXX
-XXXX`. **Forma de Pago** es informativa: Calce no almacena datos de tarjetas ni
-procesa pagos. La compra se completa directamente en la tienda de cada prenda.
+**Datos de Cuenta** el nombre, apellido, teléfono y medidas. En **Mi Perfil**,
+Datos de Cuenta, Forma de Pago y Dirección aparecen en pestañas separadas; el menú
+de usuario abre directamente cada sección. Las direcciones se guardan en la tabla
+`user_addresses` de Supabase y RLS limita la lectura y modificación a su propietario.
+Las medidas guardadas en el perfil
+se sincronizan con Tu Calce. El teléfono se guarda como `+56 9 XXXX XXXX`.
+**Forma de Pago** permite añadir y eliminar tarjetas de demostración, detectar su
+marca y elegir una predeterminada. El formulario da formato al número de 16
+dígitos y al vencimiento `MM/AA`; no ingreses datos reales. El número completo,
+vencimiento y CVV no se envían ni se guardan y se descartan al cerrar el formulario.
+El checkout muestra las tarjetas guardadas por marca, últimos cuatro dígitos y
+nombre. En el almacenamiento local de este navegador, separado por cuenta, solo se
+conservan esos datos y cuál tarjeta es la predeterminada; no se sincronizan con
+Supabase ni procesan pagos. Las direcciones se guardan solo desde **Mi Perfil →
+Dirección**; los datos introducidos únicamente en el checkout no se guardan.
+La compra real se completa directamente en la tienda de cada prenda.
 Al activar **Recuérdame** en el paso de la foto con una sesión iniciada, la foto
 y la paleta se guardan en la cuenta. Las fotos de perfil y de Tu Calce se guardan
 en un bucket privado de Supabase Storage, con acceso limitado a la persona
@@ -161,10 +181,10 @@ sesión, Tu Calce y el Probador ocultan su contenido, solicitan iniciar sesión 
 conservan el destino solicitado.
 
 1. En el panel SQL de Supabase, ejecuta [`supabase/schema.sql`](./supabase/schema.sql).
-   El esquema actualiza la tabla de perfiles, sincroniza el correo desde Auth,
-   crea el bucket privado y limita mediante RLS el acceso a cada perfil y sus
-   fotos. Si ya ejecutaste una versión anterior, vuelve a ejecutar el archivo
-   completo.
+   El esquema actualiza las tablas de perfiles y direcciones, sincroniza el correo
+   desde Auth, crea el bucket privado y limita mediante RLS el acceso a cada perfil,
+   dirección y foto. Si ya ejecutaste una versión anterior, vuelve a ejecutar el
+   archivo completo.
 2. En la configuración API del proyecto, copia la **publishable key** (o la
    antigua clave `anon`). No uses la clave `service_role`.
 3. Copia `.env.example` como `.env` en la raíz del proyecto y pega allí la
@@ -188,8 +208,10 @@ conservan el destino solicitado.
    Activa **Recordar medidas en mi cuenta** para sincronizar medidas y paleta.
    **Recordar foto en mi cuenta** guarda una copia privada de la foto;
    desactivar la opción o eliminar la foto también la borra de Supabase. En
-   **Mi Perfil → Datos de Cuenta**, guarda tus datos y medidas; en **Forma de
-   Pago**, la gestión de tarjetas permanece deshabilitada.
+   **Mi Perfil**, usa las pestañas **Datos de Cuenta** y **Forma de Pago**. La
+   primera guarda tus datos y medidas; la segunda administra métodos de
+   demostración local en el navegador, disponibles en el checkout de prueba,
+   que no procesa cargos.
 5. Si la confirmación por correo está activada, agrega la URL local de la app
    (por ejemplo `http://127.0.0.1:4173/**`) a **Authentication → URL
    Configuration → Redirect URLs** en Supabase.

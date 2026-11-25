@@ -146,6 +146,58 @@ create policy "Users can delete their own profile"
   on public.user_profiles for delete to authenticated
   using ((select auth.uid()) = user_id);
 
+create table if not exists public.user_addresses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  address_name text not null
+    check (char_length(btrim(address_name)) between 1 and 80),
+  street text not null check (char_length(btrim(street)) between 1 and 120),
+  street_number text not null
+    check (char_length(btrim(street_number)) between 1 and 20),
+  dwelling_type text not null
+    check (dwelling_type in ('casa', 'departamento', 'condominio', 'oficina', 'otro')),
+  dwelling_number text not null
+    check (char_length(btrim(dwelling_number)) between 1 and 30),
+  commune text not null check (char_length(btrim(commune)) between 1 and 80),
+  region text not null check (char_length(btrim(region)) between 1 and 80),
+  postal_code text not null
+    check (char_length(btrim(postal_code)) between 1 and 12),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists user_addresses_user_id_created_at_idx
+  on public.user_addresses (user_id, created_at desc);
+
+alter table public.user_addresses enable row level security;
+
+revoke all on public.user_addresses from anon;
+grant select, insert, update, delete on public.user_addresses to authenticated;
+
+drop policy if exists "Users can read their own shipping addresses"
+  on public.user_addresses;
+create policy "Users can read their own shipping addresses"
+  on public.user_addresses for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can insert their own shipping addresses"
+  on public.user_addresses;
+create policy "Users can insert their own shipping addresses"
+  on public.user_addresses for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can update their own shipping addresses"
+  on public.user_addresses;
+create policy "Users can update their own shipping addresses"
+  on public.user_addresses for update to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Users can delete their own shipping addresses"
+  on public.user_addresses;
+create policy "Users can delete their own shipping addresses"
+  on public.user_addresses for delete to authenticated
+  using ((select auth.uid()) = user_id);
+
 insert into storage.buckets (
   id,
   name,

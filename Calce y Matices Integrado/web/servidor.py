@@ -200,6 +200,13 @@ CATALOG_STORES_BY_URL = {
     **{url: "Vestua" for url in VESTUA_IMAGES_BY_URL},
     **WOMENSWEAR_STORES_BY_URL,
 }
+STOREFRONT_IMAGE_OVERRIDES = {
+    "https://www.paris.cl/vestido-kathy-mesh-147860.html": (
+        "https://cl-cenco-pim-resizer.ecomm.cencosud.com/unsafe/adaptive-fit-in/"
+        "792x1068/prd-cl/product-medias/9173ec32-7a10-4c4d-92c8-a74376f84fad/"
+        "MKV9BF9277/MKV9BF9277-1/1757196623064-MKV9BF9277-1-1.jpg"
+    ),
+}
 
 
 def _is_footwear(product: ProductoVestua) -> bool:
@@ -751,6 +758,74 @@ def _catalog_product_card(
     </article>"""
 
 
+def _catalog_measurement_prompt(
+    perfil: PerfilMedidas,
+    preferencia: str,
+    query: Dict[str, str],
+) -> str:
+    missing = [
+        measure
+        for measure, value in (
+            ("cintura", perfil.cintura),
+            ("cadera", perfil.cadera),
+        )
+        if value is None
+    ]
+    if not missing:
+        return ""
+
+    if len(missing) == 2:
+        message = (
+            "Para estimar cómo te queda cada prenda, necesitamos tus medidas "
+            "de cintura y cadera."
+        )
+    else:
+        message = (
+            "Para estimar cómo te queda cada prenda, completa también la "
+            f"medida de {missing[0]}."
+        )
+
+    field_config = {
+        key: (label, minimum, maximum, step, placeholder)
+        for key, label, minimum, maximum, step, placeholder in MEASUREMENT_FIELDS
+    }
+    measurement_inputs = []
+    for measure in ("waist", "hip"):
+        label, minimum, maximum, step, placeholder = field_config[measure]
+        measurement_inputs.append(
+            '<label class="catalog-measurement-field" '
+            f'for="catalog-measurement-{measure}">'
+            f'<span>{escape(label)} (cm)</span>'
+            f'<input id="catalog-measurement-{measure}" name="{measure}" '
+            f'type="number" min="{minimum}" max="{maximum}" step="{step}" '
+            f'placeholder="{escape(placeholder, quote=True)}" '
+            f'value="{escape(query.get(measure, ""), quote=True)}" required>'
+            '</label>'
+        )
+    preserved_filters = "".join(
+        f'<input type="hidden" name="{name}" '
+        f'value="{escape(query[name], quote=True)}">'
+        for name in ("search", "sort", "type", "size", "brand", "min_price", "max_price")
+        if query.get(name)
+    )
+    return (
+        '<aside class="catalog-measurement-prompt" '
+        'aria-label="Datos para estimar el calce">'
+        f"<p>{message}</p>"
+        '<form class="catalog-measurement-form" action="/" method="get" '
+        'data-catalog-measurement-form aria-label="Ingresa cintura y cadera">'
+        '<input type="hidden" name="view" value="catalog">'
+        f'<input type="hidden" name="preference" '
+        f'value="{escape(preferencia, quote=True)}">'
+        f'{preserved_filters}'
+        '<div class="catalog-measurement-fields">'
+        f'{"".join(measurement_inputs)}</div>'
+        '<button type="submit">Ver cómo quedan</button>'
+        '</form>'
+        "</aside>"
+    )
+
+
 def _garment_catalog(
     perfil: PerfilMedidas,
     preferencia: str,
@@ -803,7 +878,8 @@ def _garment_catalog(
         '<p class="catalog-result-count" data-catalog-result-count '
         f'aria-live="polite">{escape(catalog_data["result_text"])}</p>'
         '<p class="catalog-favorite-status" data-catalog-favorite-status '
-        'role="status" aria-live="polite"></p></div>'
+        'role="status" aria-live="polite"></p></div></div>'
+        '<div class="catalog-sticky-header" data-catalog-sticky-header>'
         '<div class="catalog-toolbar-actions">'
         '<button class="catalog-filter-trigger" type="button" '
         'data-catalog-open-filters aria-haspopup="dialog" '
@@ -813,7 +889,8 @@ def _garment_catalog(
         'data-catalog-filter-count>0</span></button>'
         '<label class="catalog-sort-label" for="catalog-sort"><span>Ordenar por</span>'
         '<select id="catalog-sort" data-catalog-sort>'
-        f'{sort_options}</select></label></div></div>'
+        f'{sort_options}</select></label></div>'
+        '</div>'
         '<div class="catalog-view-bar"><span class="catalog-view-count">'
         f'{catalog_data["total"]} prendas</span>'
         '<div class="catalog-view-controls" role="group" aria-label="Vista de productos">'
@@ -864,6 +941,7 @@ def _garment_catalog(
         f'data-catalog-total="{catalog_data["total"]}">'
         f'Mostrar {catalog_data["total"]} productos</button></footer>'
         '</div></dialog>'
+        f'{_catalog_measurement_prompt(perfil, preferencia, query)}'
         f'<div class="catalog-grid" data-catalog-items '
         f'data-catalog-page-size="{CATALOG_PAGE_SIZE}" data-view="5">'
         f'{catalog_data["cards"]}</div>'
@@ -2301,6 +2379,21 @@ def _alternative_recommendations(
 
 
 def _storefront_content() -> str:
+    def image_url(product: ProductoVestua) -> str:
+        return STOREFRONT_IMAGE_OVERRIDES.get(
+            product.url, CATALOG_IMAGES_BY_URL[product.url]
+        )
+
+    def image_alt(product: ProductoVestua) -> str:
+        if product.url in STOREFRONT_IMAGE_OVERRIDES:
+            return f"Imagen referencial de vestido blanco para {product.titulo}."
+        return product.titulo
+
+    def image_note(product: ProductoVestua) -> str:
+        if product.url in STOREFRONT_IMAGE_OVERRIDES:
+            return '<span class="image-source">Imagen referencial · vestido blanco</span>'
+        return ""
+
     category_specs = (
         ("Blusas", "Blusa"),
         ("Jeans", "Jeans"),
@@ -2320,7 +2413,7 @@ def _storefront_content() -> str:
         f"""<a class="storefront-category" href="/?{urlencode({
             "view": "catalog", "type": product_type
         })}" aria-label="Explorar {escape(label, quote=True)}">
-          <img src="{escape(CATALOG_IMAGES_BY_URL[product.url], quote=True)}"
+          <img src="{escape(image_url(product), quote=True)}"
             alt="" loading="lazy" referrerpolicy="no-referrer">
           <span class="storefront-category-copy">
             <span class="eyebrow">Descubre</span><strong>{escape(label)}</strong>
@@ -2334,9 +2427,10 @@ def _storefront_content() -> str:
         f"""<article class="storefront-product">
           <a class="storefront-product-image" href="{escape(product.url, quote=True)}"
             target="_blank" rel="noopener noreferrer">
-            <img src="{escape(CATALOG_IMAGES_BY_URL[product.url], quote=True)}"
-              alt="{escape(product.titulo, quote=True)}" loading="lazy"
+            <img src="{escape(image_url(product), quote=True)}"
+              alt="{escape(image_alt(product), quote=True)}" loading="lazy"
               referrerpolicy="no-referrer">
+            {image_note(product)}
           </a>
           <div class="storefront-product-info">
             <span>{escape(CATALOG_STORES_BY_URL.get(product.url, "Vestua"))}
@@ -2351,12 +2445,10 @@ def _storefront_content() -> str:
     )
     hero_product = products_by_type.get("Vestido")
     hero_image = (
-        f"""<a class="storefront-hero-visual"
-          href="{escape(hero_product.url, quote=True)}" target="_blank"
-          rel="noopener noreferrer" aria-label="Ver {escape(hero_product.titulo, quote=True)}">
-          <img src="{escape(CATALOG_IMAGES_BY_URL[hero_product.url], quote=True)}"
+        f"""<div class="storefront-hero-visual">
+          <img src="{escape(image_url(hero_product), quote=True)}"
             alt="" fetchpriority="high" referrerpolicy="no-referrer">
-        </a>"""
+        </div>"""
         if hero_product
         else ""
     )
@@ -2377,12 +2469,44 @@ def _storefront_content() -> str:
           <span class="eyebrow">Calce · estilo personal</span>
           <h1 id="storefront-title">Tu estilo, tu calce, tu manera de elegir.</h1>
           <p>Explora prendas, descubre nuevos favoritos y encuentra referencias que te ayuden a elegir con más confianza.</p>
-          <div class="storefront-hero-actions">
-            <a class="matices-button matices-button-primary" href="/?view=catalog">Explorar prendas</a>
-            <a class="matices-button" href="/?view=home">Tu Calce</a>
-          </div>
+        </div>
+        <div class="storefront-hero-actions">
+          <a class="matices-button matices-button-primary" href="/?view=catalog">Explorar prendas</a>
         </div>
         {hero_image}
+      </section>
+      <section class="storefront-how-to" aria-labelledby="storefront-how-to-title">
+        <h2 id="storefront-how-to-title">¿Qué es “Tu Calce” y cómo se usa?</h2>
+        <p class="storefront-how-to-intro">
+          Tu Calce es una guía personal: usa una foto para orientar tu paleta de color
+          y tus medidas corporales para estimar tallas y cómo podrían quedarte las prendas.
+          Sus recomendaciones son referenciales.
+        </p>
+        <ol class="storefront-how-to-steps">
+          <li><span class="storefront-how-to-number" aria-hidden="true">01</span>
+            <div><h3>Abre Tu Calce</h3>
+              <p>Entra desde el menú principal e inicia sesión si te lo solicita.</p></div>
+          </li>
+          <li><span class="storefront-how-to-number" aria-hidden="true">02</span>
+            <div><h3>Sube o toma una foto</h3>
+              <p>Elige una imagen con buena luz para recibir una orientación de color.</p></div>
+          </li>
+          <li><span class="storefront-how-to-number" aria-hidden="true">03</span>
+            <div><h3>Registra tus medidas</h3>
+              <p>Anota tus medidas en centímetros; cintura y cadera ayudan a estimar el calce.</p></div>
+          </li>
+          <li><span class="storefront-how-to-number" aria-hidden="true">04</span>
+            <div><h3>Revisa tu resumen</h3>
+              <p>Consulta tu paleta sugerida y las tallas estimadas según las medidas ingresadas.</p></div>
+          </li>
+          <li><span class="storefront-how-to-number" aria-hidden="true">05</span>
+            <div><h3>Explora y prueba</h3>
+              <p>Compara prendas en el Catálogo y selecciona las que quieras probar.</p></div>
+          </li>
+        </ol>
+        <div class="storefront-how-to-action">
+          <a class="matices-button matices-button-primary" href="/?view=home">Tu Calce</a>
+        </div>
       </section>
       <section class="storefront-promise" aria-labelledby="storefront-promise-title">
         <h2 id="storefront-promise-title">Una experiencia para elegir a tu manera</h2>
@@ -2521,7 +2645,7 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
     active_view = (
         requested_view
         if requested_view in {
-            "storefront", "home", "catalog", "cart", "account", "try-on",
+            "storefront", "home", "catalog", "cart", "checkout", "account", "try-on",
             "profile", "info", "favorites"
         }
         else "home" if "wizard_step" in query else "storefront"
@@ -2733,6 +2857,9 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
             if active_view == "account" and query.get("auth_mode") == "sign-up"
             else ""
         ),
+        nav_account_links_hidden=(
+            ' hidden' if active_view == "account" else ""
+        ),
         home_panel_hidden=(
             ' hidden' if active_view != "account" else ""
         ),
@@ -2752,6 +2879,7 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         try_on_panel_hidden=' hidden',
         profile_panel_hidden=' hidden',
         cart_panel_hidden=' hidden' if active_view != "cart" else "",
+        checkout_panel_hidden=' hidden' if active_view != "checkout" else "",
         favorites_panel_hidden=(
             ' hidden' if active_view != "favorites" else ""
         ),
