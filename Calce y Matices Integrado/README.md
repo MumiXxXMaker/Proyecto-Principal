@@ -25,6 +25,10 @@ conserva la guía para foto, medidas y recomendaciones de calce.
    prendas. Las tarjetas y la comparación muestran el calce estimado y las
    medidas referenciales disponibles. Usa el botón **Añadir al carrito** con el
    símbolo de carrito en cada prenda para agregarla sin salir del catálogo.
+   En **Home**, la sección **Recomendaciones de conjuntos** muestra ideas de
+   una prenda superior y otra inferior, basadas en las categorías del catálogo;
+   no representan una combinación verificada de color o estilo. Para probar
+   prendas, selecciónalas desde las tarjetas del **Catálogo**.
    También puedes indicar la cantidad y talla que llevarás; estos campos no
    aparecen para Vestua, donde se conserva la talla publicada y se agrega una
    sola unidad. **Confirmar Pago** abre un checkout de demostración para ingresar
@@ -111,6 +115,10 @@ definen, usan `RAPIDAPI_KEY`. Cada API requiere una suscripción activa en
 RapidAPI. Copia `.env.example` como punto de partida y agrega las claves
 necesarias como secretos en Render. La clave que usa el servidor web se
 configura por separado de la conexión MCP de VS Code.
+
+Virtual Try On 4 está disponible como proveedor independiente en el Probador.
+Configura `RAPIDAPI_VTON4_KEY` para su clave (o reutiliza `RAPIDAPI_KEY` si
+corresponde); procesa una prenda por solicitud mediante `POST /tryon`.
 
 En modo **Automático**, si Try on Clothes Pro falla, la app intenta DataToBiz
 una vez para una prenda superior individual e informa el error de cada API si

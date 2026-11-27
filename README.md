@@ -308,11 +308,20 @@ catálogo actual no incluye marcas de molde asiático.
 ```bash
 python3 -m unittest discover -s tests -v
 ```
-## Run App
-1. Abrir Terminal
-2. Ejecutar: 
-   cd "/Users/raimundolarrain/Desktop/Práctica/Proyectos/Proyecto Principal/Calce y Matices Integrado/web/"
-3. Ejecutar:
-   node app.js  
-4. Ejecutar:
-   npm start
+## Ejecutar la aplicación
+
+Desde una terminal, entra a la carpeta del proyecto, instala las dependencias
+Python y ejecuta el servidor web:
+
+```bash
+cd "/Users/raimundolarrain/Desktop/Práctica/Proyectos/Proyecto Principal/Calce y Matices Integrado"
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python app.py
+```
+
+Después abre <http://127.0.0.1:4173/>. Si prefieres `npm start`, activa antes
+el entorno con `source .venv/bin/activate` y ejecútalo desde esa misma carpeta.
+No ejecutes
+`web/app.js` con Node: es JavaScript del navegador y necesita `window` y
+`document`.

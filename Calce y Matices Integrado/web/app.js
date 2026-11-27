@@ -308,6 +308,64 @@ document.querySelectorAll('[name="bust"], [name="waist"], [name="hip"]')
   const cartList = cartPanel?.querySelector("[data-cart-items]");
   const itemCount = cartPanel?.querySelector("[data-cart-item-count]");
   const total = cartPanel?.querySelector("[data-cart-total]");
+  const recommendationsDialog = cartPanel?.querySelector(
+    "[data-cart-recommendations-dialog]",
+  );
+  const recommendationsClose = recommendationsDialog?.querySelector(
+    "[data-cart-recommendations-close]",
+  );
+  const recommendationCards = Array.from(
+    recommendationsDialog?.querySelectorAll("[data-cart-recommendations-outfits] > .storefront-outfit") || [],
+  );
+  let activeRecommendations = [];
+  let activeRecommendation = 0;
+
+  const showRecommendation = index => {
+    if (!activeRecommendations.length) return;
+    activeRecommendation = (index + activeRecommendations.length) % activeRecommendations.length;
+    const activeCard = activeRecommendations[activeRecommendation];
+    recommendationCards.forEach((card, cardIndex) => {
+      const isActive = card === activeCard;
+      card.hidden = !isActive;
+      card.setAttribute("aria-hidden", String(!isActive));
+    });
+  };
+
+  const chooseRecommendations = () => {
+    const shuffled = [...recommendationCards];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    activeRecommendations = shuffled.slice(0, Math.min(3, shuffled.length));
+    const cardSignature = card => Array.from(
+      card.querySelectorAll(".cart-recommendation-image"),
+      link => link.href,
+    ).sort().join(",");
+    try {
+      const previousSignatures = new Set(
+        (sessionStorage.getItem("calce-recommended-outfits") || "")
+          .split("|")
+          .filter(Boolean),
+      );
+      const newCombinations = shuffled.filter(card => !previousSignatures.has(cardSignature(card)));
+      if (newCombinations.length >= Math.min(3, shuffled.length)) {
+        activeRecommendations = newCombinations.slice(0, 3);
+      }
+      sessionStorage.setItem(
+        "calce-recommended-outfits",
+        activeRecommendations.map(cardSignature).join("|"),
+      );
+    } catch (error) {
+      console.warn("No se pudo recordar la selección anterior de conjuntos.", error);
+    }
+    showRecommendation(0);
+  };
+
+  recommendationsDialog?.querySelector("[data-cart-recommendations-previous]")
+    ?.addEventListener("click", () => showRecommendation(activeRecommendation - 1));
+  recommendationsDialog?.querySelector("[data-cart-recommendations-next]")
+    ?.addEventListener("click", () => showRecommendation(activeRecommendation + 1));
   const currency = new Intl.NumberFormat("es-CL", {
     style: "currency",
     currency: "CLP",
@@ -364,6 +422,25 @@ document.querySelectorAll('[name="bust"], [name="waist"], [name="hip"]')
   };
 
   let items = readCart();
+
+  const closeRecommendations = () => {
+    if (recommendationsDialog?.open) recommendationsDialog.close();
+  };
+
+  recommendationsClose?.addEventListener("click", closeRecommendations);
+  recommendationsDialog?.querySelector("[data-cart-recommendations-decline]")
+    ?.addEventListener("click", closeRecommendations);
+  recommendationsDialog?.addEventListener("click", event => {
+    if (event.target === recommendationsDialog) closeRecommendations();
+  });
+  if (recommendationsDialog && cartPanel && !cartPanel.hidden) {
+    requestAnimationFrame(() => {
+      if (!recommendationsDialog.open) {
+        chooseRecommendations();
+        recommendationsDialog.showModal();
+      }
+    });
+  }
 
   const updateAddButtons = () => {
     document.querySelectorAll("[data-cart-add]").forEach(button => {
@@ -3109,6 +3186,22 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     if (filterCount) filterCount.textContent = String(activeFilters);
   };
 
+  const validateCatalogPriceRange = () => {
+    const minimum = minPriceFilter.value.trim();
+    const maximum = maxPriceFilter.value.trim();
+    const inverted = minimum && maximum && Number(minimum) > Number(maximum);
+    const message = inverted
+      ? "El precio mínimo no puede ser mayor que el precio máximo."
+      : "";
+    minPriceFilter.setCustomValidity(message);
+    maxPriceFilter.setCustomValidity(message);
+    minPriceFilter.setAttribute("aria-invalid", String(Boolean(message)));
+    maxPriceFilter.setAttribute("aria-invalid", String(Boolean(message)));
+    if (applyFiltersButton) applyFiltersButton.disabled = Boolean(message);
+    if (message) resultCount.textContent = message;
+    return !message;
+  };
+
   const updateHeading = () => {
     if (!heading) return;
     const searchTerm = searchInput.value.trim();
@@ -3393,6 +3486,14 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       }
       const data = await readJsonResponse(response, "Catálogo");
       if (requestId !== requestNumber) return;
+      for (const key of ["search", "type", "size", "brand", "min_price", "max_price"]) {
+        if (!params.get(key)?.trim()) params.delete(key);
+      }
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}?${params.toString()}${window.location.hash}`,
+      );
       const template = document.createElement("template");
       template.innerHTML = data.cards;
       itemsContainer.replaceChildren(template.content);
@@ -3420,8 +3521,12 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   [typeFilter, sizeFilter, brandFilter, minPriceFilter, maxPriceFilter].forEach(filter => {
     filter.addEventListener("change", () => {
       updateFilterSummary();
+      if (!validateCatalogPriceRange()) return;
       loadPage(0);
     });
+  });
+  [minPriceFilter, maxPriceFilter].forEach(filter => {
+    filter.addEventListener("input", validateCatalogPriceRange);
   });
   openFiltersButton?.addEventListener("click", () => {
     filtersDialog?.showModal();
@@ -3433,6 +3538,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     [typeFilter, sizeFilter, brandFilter, minPriceFilter, maxPriceFilter].forEach(filter => {
       filter.value = "";
     });
+    validateCatalogPriceRange();
     updateFilterSummary();
     loadPage(0);
   });
@@ -3446,6 +3552,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     button.addEventListener("click", () => setCatalogView(button.dataset.catalogView));
   });
   updateFilterSummary();
+  validateCatalogPriceRange();
   if (applyFiltersButton) {
     updateResultTotal(Number(applyFiltersButton.dataset.catalogTotal) || 0);
   }
@@ -3589,6 +3696,43 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const tryOnResult = tryOnPanel?.querySelector("[data-vton-result]");
   const tryOnResultImage = tryOnPanel?.querySelector("[data-vton-result-image]");
   const tryOnResultStatus = tryOnPanel?.querySelector("[data-vton-result-status]");
+  const tryOnRecommendationCards = Array.from(
+    tryOnPanel?.querySelectorAll("[data-try-on-recommendations-outfits] > .storefront-outfit") || [],
+  );
+  let activeTryOnRecommendations = [];
+  let activeTryOnRecommendationPage = 0;
+  const tryOnRecommendationsPerPage = 2;
+  const showTryOnRecommendationPage = page => {
+    if (!activeTryOnRecommendations.length) return;
+    const pageCount = Math.ceil(
+      activeTryOnRecommendations.length / tryOnRecommendationsPerPage,
+    );
+    activeTryOnRecommendationPage = (page + pageCount) % pageCount;
+    const firstCard = activeTryOnRecommendationPage * tryOnRecommendationsPerPage;
+    tryOnRecommendationCards.forEach(card => {
+      const cardIndex = activeTryOnRecommendations.indexOf(card);
+      const isActive = cardIndex >= firstCard
+        && cardIndex < firstCard + tryOnRecommendationsPerPage;
+      card.hidden = !isActive;
+      card.setAttribute("aria-hidden", String(!isActive));
+    });
+  };
+  if (tryOnRecommendationCards.length) {
+    const shuffled = [...tryOnRecommendationCards];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    activeTryOnRecommendations = shuffled.slice(
+      0,
+      Math.min(tryOnRecommendationsPerPage * 2, shuffled.length),
+    );
+    showTryOnRecommendationPage(0);
+  }
+  tryOnPanel?.querySelector("[data-try-on-recommendations-previous]")
+    ?.addEventListener("click", () => showTryOnRecommendationPage(activeTryOnRecommendationPage - 1));
+  tryOnPanel?.querySelector("[data-try-on-recommendations-next]")
+    ?.addEventListener("click", () => showTryOnRecommendationPage(activeTryOnRecommendationPage + 1));
 
   const updateTryOnProviderHelp = () => {
     if (!tryOnProviderSelect || !tryOnProviderHelp) return;
@@ -3598,6 +3742,8 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       datatobiz: "DataToBiz admite una sola prenda superior.",
       diffusion: "Try-On Diffusion procesa una prenda por solicitud; no combina prendas.",
       refiner: "Genera primero con Try on Clothes Pro y luego refina; ambas APIs deben estar activas.",
+      vton4: "Virtual Try On 4 procesa una prenda por solicitud.",
+      clothing_tryon: "Clothing Try-On API procesa una prenda superior, inferior o vestido por solicitud.",
     };
     tryOnProviderHelp.textContent = helpText[tryOnProviderSelect.value] || helpText.automatic;
     if (tryOnGenderField) {
@@ -4341,6 +4487,8 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
         datatobiz: "Generando directamente con DataToBiz…",
         diffusion: "Generando directamente con Try-On Diffusion…",
         refiner: "Generando y refinando con dos APIs…",
+        vton4: "Generando directamente con Virtual Try On 4…",
+        clothing_tryon: "Generando directamente con Clothing Try-On API…",
       };
       tryOnStatus.textContent = providerStatus[provider] || providerStatus.automatic;
       const response = await fetch("/api/try-on", {

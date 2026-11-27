@@ -8,7 +8,7 @@
   <meta name="supabase-publishable-key" content="{supabase_publishable_key}">
   <title>Calce Wardrobe</title>
   <link rel="icon" type="image/png" href="/assets/calce-isotipo.png">
-  <link rel="stylesheet" href="/styles.css?v=checkout-payment-controls-1">
+  <link rel="stylesheet" href="/styles.css?v=try-on-result-frame-2">
 </head>
 <body>
   <header><div class="wrap nav">
@@ -286,6 +286,25 @@
             <p class="sub">Revisa las prendas antes de continuar.</p>
           </div>
         </header>
+        <dialog class="cart-recommendations-dialog" data-cart-recommendations-dialog
+          aria-labelledby="cart-recommendations-title">
+          <div class="cart-recommendations-content">
+            <button class="cart-recommendations-close" type="button"
+              data-cart-recommendations-close aria-label="Cerrar recomendaciones">×</button>
+            <span class="eyebrow">Elegidas para ti</span>
+            <h2 id="cart-recommendations-title">Tus Recomendados</h2>
+            <div class="cart-recommendations-carousel" data-cart-recommendations-carousel>
+              <button class="cart-recommendations-arrow" type="button"
+                data-cart-recommendations-previous aria-label="Ver conjunto anterior">‹</button>
+              <div class="cart-recommendations-outfits" data-cart-recommendations-outfits
+                aria-live="polite">{cart_recommendations}</div>
+              <button class="cart-recommendations-arrow" type="button"
+                data-cart-recommendations-next aria-label="Ver conjunto siguiente">›</button>
+            </div>
+            <button class="matices-button matices-button-primary cart-recommendations-decline" type="button"
+              data-cart-recommendations-decline>No, gracias</button>
+          </div>
+        </dialog>
         <div class="cart-empty" data-cart-empty hidden>
           <p>Tu carrito está vacío.</p>
           <a class="matices-button matices-button-primary" href="{catalog_tab_url}">
@@ -643,6 +662,6 @@
       </div>
     </form>
   </dialog>
-  <script src="/app.js?v=checkout-payment-controls-1" defer></script>
+  <script src="/app.js?v=clothing-try-on-provider-1" defer></script>
 </body>
 </html>

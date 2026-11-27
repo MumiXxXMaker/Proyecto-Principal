@@ -617,6 +617,7 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertIn(f'data-catalog-min-price value="{price}"', catalog_page)
         self.assertIn(f'data-catalog-max-price value="{price}"', catalog_page)
+        self.assertIn('step="1" data-catalog-min-price', catalog_page)
 
     def test_catalog_reuses_fit_recommendations_for_the_same_profile(self):
         query = {
@@ -1155,6 +1156,8 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('<option value="automatic">Automático</option>', try_on_page)
         self.assertIn('value="diffusion"', try_on_page)
         self.assertIn('value="refiner"', try_on_page)
+        self.assertIn('value="vton4"', try_on_page)
+        self.assertIn('value="clothing_tryon">Clothing Try-On API</option>', try_on_page)
         self.assertIn("data-vton-gender", try_on_page)
         self.assertIn('<option value="woman" selected>Mujer</option>', try_on_page)
         self.assertIn("data-vton-generate", try_on_page)
@@ -1479,6 +1482,26 @@ class ExcelCatalogTests(unittest.TestCase):
             storefront_page.index('<section class="storefront-promise"'),
         )
         self.assertIn("Productos destacados", storefront_page)
+        outfit_section = storefront_page.split(
+            '<section class="storefront-section storefront-outfit-section"', 1
+        )[1].split("</section>", 1)[0]
+        self.assertIn("Recomendaciones de conjuntos", outfit_section)
+        self.assertIn("no en colores o estilos", outfit_section)
+        self.assertEqual(
+            len(re.findall(r'<article class="storefront-outfit">', outfit_section)),
+            3,
+        )
+        outfit_product_urls = re.findall(
+            r'<a class="storefront-outfit-piece"\s+href="([^"]+)"',
+            outfit_section,
+        )
+        self.assertEqual(len(outfit_product_urls), 6)
+        self.assertTrue(
+            all(
+                product_url in {product.url for product in CATALOG_PRODUCTS}
+                for product_url in outfit_product_urls
+            )
+        )
         self.assertIn('data-page-panel="storefront"', storefront_page)
         self.assertNotIn("Conocer mi calce", storefront_page)
         self.assertIn('data-page-panel="storefront" hidden', home_page)
