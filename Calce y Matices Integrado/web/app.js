@@ -29,6 +29,68 @@ const finishAuthStateInitialization = isAuthenticated => {
   resolveAuthStateReady = null;
 };
 
+const profileTabList = document.querySelector('[role="tablist"][aria-label="Secciones de Mi Perfil"]');
+const profileTabButtons = Array.from(
+  profileTabList?.querySelectorAll('[role="tab"][data-profile-tab]') || [],
+);
+const profileTabPanels = Array.from(
+  document.querySelectorAll("[data-profile-tab-panel]"),
+);
+const activateProfileTab = (name, { focus = false, updateHash = false } = {}) => {
+  const activeTab = profileTabButtons.find(tab => tab.dataset.profileTab === name);
+  const activePanel = profileTabPanels.find(panel => panel.dataset.profileTabPanel === name);
+  if (!activeTab || !activePanel) return;
+  profileTabButtons.forEach(tab => {
+    const selected = tab === activeTab;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  });
+  profileTabPanels.forEach(panel => {
+    panel.hidden = panel !== activePanel;
+  });
+  if (updateHash && window.location.hash !== `#${activePanel.id}`) {
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${window.location.search}#${activePanel.id}`,
+    );
+  }
+  if (focus) activeTab.focus();
+};
+if (profileTabButtons.length && profileTabPanels.length) {
+  profileTabButtons.forEach(tab => {
+    tab.addEventListener("click", () => {
+      activateProfileTab(tab.dataset.profileTab, { updateHash: true });
+    });
+  });
+  profileTabList.addEventListener("keydown", event => {
+    const currentIndex = profileTabButtons.indexOf(event.target);
+    if (currentIndex < 0) return;
+    let nextIndex;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % profileTabButtons.length;
+    else if (event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + profileTabButtons.length) % profileTabButtons.length;
+    } else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = profileTabButtons.length - 1;
+    else return;
+    event.preventDefault();
+    activateProfileTab(profileTabButtons[nextIndex].dataset.profileTab, {
+      focus: true,
+      updateHash: true,
+    });
+  });
+  const tabFromHash = ["payment", "address"].find(name =>
+    window.location.hash === `#profile-${name}`,
+  ) || "account";
+  activateProfileTab(tabFromHash);
+  window.addEventListener("hashchange", () => {
+    const hashTab = ["payment", "address"].find(name =>
+      window.location.hash === `#profile-${name}`,
+    ) || "account";
+    activateProfileTab(hashTab);
+  });
+}
+
 const readJsonResponse = async (response, endpoint) => {
   const body = await response.text();
   const contentType = response.headers.get("content-type") || "sin Content-Type";
@@ -50,6 +112,7 @@ const readJsonResponse = async (response, endpoint) => {
 };
 
 const catalogSelectionStorageKey = "calce-selected-catalog-garments";
+let tryOnPhotoSavePromise = Promise.resolve(true);
 const readSelectedCatalogGarments = () => {
   const savedSelection = sessionStorage.getItem(catalogSelectionStorageKey);
   if (!savedSelection) return [];
@@ -245,7 +308,64 @@ document.querySelectorAll('[name="bust"], [name="waist"], [name="hip"]')
   const cartList = cartPanel?.querySelector("[data-cart-items]");
   const itemCount = cartPanel?.querySelector("[data-cart-item-count]");
   const total = cartPanel?.querySelector("[data-cart-total]");
-  const confirmation = cartPanel?.querySelector("[data-cart-confirmation]");
+  const recommendationsDialog = cartPanel?.querySelector(
+    "[data-cart-recommendations-dialog]",
+  );
+  const recommendationsClose = recommendationsDialog?.querySelector(
+    "[data-cart-recommendations-close]",
+  );
+  const recommendationCards = Array.from(
+    recommendationsDialog?.querySelectorAll("[data-cart-recommendations-outfits] > .storefront-outfit") || [],
+  );
+  let activeRecommendations = [];
+  let activeRecommendation = 0;
+
+  const showRecommendation = index => {
+    if (!activeRecommendations.length) return;
+    activeRecommendation = (index + activeRecommendations.length) % activeRecommendations.length;
+    const activeCard = activeRecommendations[activeRecommendation];
+    recommendationCards.forEach((card, cardIndex) => {
+      const isActive = card === activeCard;
+      card.hidden = !isActive;
+      card.setAttribute("aria-hidden", String(!isActive));
+    });
+  };
+
+  const chooseRecommendations = () => {
+    const shuffled = [...recommendationCards];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    activeRecommendations = shuffled.slice(0, Math.min(3, shuffled.length));
+    const cardSignature = card => Array.from(
+      card.querySelectorAll(".cart-recommendation-image"),
+      link => link.href,
+    ).sort().join(",");
+    try {
+      const previousSignatures = new Set(
+        (sessionStorage.getItem("calce-recommended-outfits") || "")
+          .split("|")
+          .filter(Boolean),
+      );
+      const newCombinations = shuffled.filter(card => !previousSignatures.has(cardSignature(card)));
+      if (newCombinations.length >= Math.min(3, shuffled.length)) {
+        activeRecommendations = newCombinations.slice(0, 3);
+      }
+      sessionStorage.setItem(
+        "calce-recommended-outfits",
+        activeRecommendations.map(cardSignature).join("|"),
+      );
+    } catch (error) {
+      console.warn("No se pudo recordar la selección anterior de conjuntos.", error);
+    }
+    showRecommendation(0);
+  };
+
+  recommendationsDialog?.querySelector("[data-cart-recommendations-previous]")
+    ?.addEventListener("click", () => showRecommendation(activeRecommendation - 1));
+  recommendationsDialog?.querySelector("[data-cart-recommendations-next]")
+    ?.addEventListener("click", () => showRecommendation(activeRecommendation + 1));
   const currency = new Intl.NumberFormat("es-CL", {
     style: "currency",
     currency: "CLP",
@@ -302,6 +422,25 @@ document.querySelectorAll('[name="bust"], [name="waist"], [name="hip"]')
   };
 
   let items = readCart();
+
+  const closeRecommendations = () => {
+    if (recommendationsDialog?.open) recommendationsDialog.close();
+  };
+
+  recommendationsClose?.addEventListener("click", closeRecommendations);
+  recommendationsDialog?.querySelector("[data-cart-recommendations-decline]")
+    ?.addEventListener("click", closeRecommendations);
+  recommendationsDialog?.addEventListener("click", event => {
+    if (event.target === recommendationsDialog) closeRecommendations();
+  });
+  if (recommendationsDialog && cartPanel && !cartPanel.hidden) {
+    requestAnimationFrame(() => {
+      if (!recommendationsDialog.open) {
+        chooseRecommendations();
+        recommendationsDialog.showModal();
+      }
+    });
+  }
 
   const updateAddButtons = () => {
     document.querySelectorAll("[data-cart-add]").forEach(button => {
@@ -415,7 +554,6 @@ document.querySelectorAll('[name="bust"], [name="waist"], [name="hip"]')
     try {
       localStorage.setItem(storageKey, JSON.stringify(nextItems));
       items = nextItems;
-      if (confirmation) confirmation.hidden = true;
       renderCart();
       return true;
     } catch (error) {
@@ -488,13 +626,6 @@ document.querySelectorAll('[name="bust"], [name="waist"], [name="hip"]')
       return;
     }
 
-    const confirmButton = event.target.closest("[data-cart-confirm]");
-    if (confirmButton && confirmation) {
-      confirmation.textContent =
-        "Selección confirmada. No se generó una orden ni se realizó un pago. " +
-        "Abre cada tienda desde «Ver en la tienda» para revisar disponibilidad y completar la compra.";
-      confirmation.hidden = false;
-    }
   });
 
   window.addEventListener("calce:add-to-cart", event => {
@@ -1150,6 +1281,28 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const profileAccountLink = document.querySelector("[data-profile-account]");
     const profileFavoritesLink = document.querySelector("[data-profile-favorites]");
     const profilePaymentLink = document.querySelector("[data-profile-payment]");
+    const profileAddressLink = document.querySelector("[data-profile-address]");
+    const profileAddressForm = document.querySelector("[data-profile-address-form]");
+    const profileAddressIdInput = document.querySelector("[data-profile-address-id]");
+    const profileAddressSaveButton = document.querySelector("[data-profile-address-save]");
+    const profileAddressCancelButton = document.querySelector(
+      "[data-profile-address-cancel]",
+    );
+    const profileAddressList = document.querySelector("[data-profile-address-list]");
+    const profileAddressEmptyMessage = document.querySelector(
+      "[data-profile-address-empty]",
+    );
+    const profileAddressStatus = document.querySelector("[data-profile-address-status]");
+    const profileAddressFields = {
+      address_name: document.getElementById("profile-address-name"),
+      street: document.getElementById("profile-address-street"),
+      street_number: document.getElementById("profile-address-street-number"),
+      dwelling_type: document.getElementById("profile-address-dwelling-type"),
+      dwelling_number: document.getElementById("profile-address-dwelling-number"),
+      commune: document.getElementById("profile-address-commune"),
+      region: document.getElementById("profile-address-region"),
+      postal_code: document.getElementById("profile-address-postal-code"),
+    };
     const navAccountLinks = document.querySelector(".nav-account-links");
     const profileName = document.querySelector("[data-profile-name]");
     const profileAvatar = document.querySelector("[data-profile-avatar]");
@@ -1164,6 +1317,63 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     const profilePhoneInput = document.getElementById("profile-phone");
     const profileDataStatus = document.querySelector("[data-profile-data-status]");
     const saveProfileDataButton = document.querySelector("[data-save-profile-data]");
+    const paymentAddButton = document.querySelector("[data-payment-add]");
+    const paymentMethodsList = document.querySelector("[data-payment-method-list]");
+    const paymentEmptyMessage = document.querySelector("[data-payment-empty]");
+    const paymentStatus = document.querySelector("[data-payment-status]");
+    const paymentDialog = document.querySelector("[data-payment-dialog]");
+    let paymentDialogOpenedFromCheckout = false;
+    const paymentForm = document.querySelector("[data-payment-form]");
+    const paymentCardNumberInput = document.getElementById("payment-card-number");
+    const paymentExpirationInput = document.getElementById("payment-card-expiration");
+    const paymentCvvInput = document.getElementById("payment-card-cvv");
+    const paymentCardholderInput = document.getElementById("payment-cardholder-name");
+    const paymentDetectedBrand = document.querySelector("[data-payment-detected-brand]");
+    const paymentPreviewBrand = document.querySelector("[data-payment-preview-brand]");
+    const paymentPreviewNumber = document.querySelector("[data-payment-preview-number]");
+    const paymentPreviewExpiration = document.querySelector(
+      "[data-payment-preview-expiration]",
+    );
+    const paymentPreviewHolder = document.querySelector(
+      "[data-payment-preview-holder]",
+    );
+    const paymentCancelButton = document.querySelector("[data-payment-cancel]");
+    const checkoutForm = document.querySelector("[data-checkout-form]");
+    const checkoutPaymentSelect = document.querySelector(
+      "[data-checkout-payment-select]",
+    );
+    const checkoutAddPaymentButton = document.querySelector(
+      "[data-checkout-payment-add]",
+    );
+    const checkoutPaymentHint = document.querySelector(
+      "[data-checkout-payment-hint]",
+    );
+    const checkoutAddressSelect = document.querySelector(
+      "[data-checkout-address-select]",
+    );
+    const checkoutAddressHint = document.querySelector(
+      "[data-checkout-address-hint]",
+    );
+    const checkoutAddressSignInLink = document.querySelector(
+      "[data-checkout-address-sign-in]",
+    );
+    const checkoutAddressManageLink = document.querySelector(
+      "[data-checkout-address-manage]",
+    );
+    const checkoutAddressFields = {
+      street: document.getElementById("checkout-street"),
+      street_number: document.getElementById("checkout-street-number"),
+      dwelling_type: document.getElementById("checkout-dwelling-type"),
+      dwelling_number: document.getElementById("checkout-dwelling-number"),
+      commune: document.getElementById("checkout-commune"),
+      region: document.getElementById("checkout-region"),
+      postal_code: document.getElementById("checkout-postal-code"),
+    };
+    const checkoutSignInLink = document.querySelector("[data-checkout-sign-in]");
+    const checkoutManagePaymentsLink = document.querySelector(
+      "[data-checkout-manage]",
+    );
+    const checkoutStatus = document.querySelector("[data-checkout-status]");
     const profileBustInput = document.getElementById("profile-bust");
     const profileWaistInput = document.getElementById("profile-waist");
     const profileHipInput = document.getElementById("profile-hip");
@@ -1183,6 +1393,558 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
     let signedInUser;
     let activeUserId;
     let profileLoadedUserId;
+    let savedAddresses = [];
+    let savedAddressesLoadedUserId;
+    let savedAddressesLoadError = false;
+    let checkoutAddressEdited = false;
+    let checkoutAutoFilledAddressId = null;
+    const isDedicatedAccountView =
+      new URLSearchParams(window.location.search).get("view") === "account";
+    let inlineAccountFormVisible = false;
+    const updateNavAccountLinks = () => {
+      if (navAccountLinks) {
+        navAccountLinks.hidden = Boolean(signedInUser)
+          || isDedicatedAccountView
+          || inlineAccountFormVisible;
+      }
+    };
+    window.addEventListener("calce:open-account", () => {
+      inlineAccountFormVisible = true;
+      updateNavAccountLinks();
+    });
+    window.addEventListener("calce:close-account", () => {
+      inlineAccountFormVisible = false;
+      updateNavAccountLinks();
+    });
+    const paymentBrands = new Set([
+      "Visa", "Mastercard", "American Express", "Discover",
+      "Diners Club", "JCB", "UnionPay", "Otra",
+    ]);
+    const paymentMethodsStorageKey = userId => `calce-payment-methods:${userId}`;
+    const detectPaymentBrand = digits => {
+      if (!digits) return "";
+      const firstTwo = Number(digits.slice(0, 2));
+      const firstFour = Number(digits.slice(0, 4));
+      const firstSix = Number(digits.slice(0, 6));
+      if (digits.startsWith("4")) return "Visa";
+      if (
+        (firstTwo >= 51 && firstTwo <= 55)
+        || (digits.length >= 4 && firstFour >= 2221 && firstFour <= 2720)
+      ) {
+        return "Mastercard";
+      }
+      if (
+        /^(6011|65|64[4-9])/.test(digits)
+        || (digits.length >= 6 && firstSix >= 622126 && firstSix <= 622925)
+      ) {
+        return "Discover";
+      }
+      if (digits.length >= 4 && firstFour >= 3528 && firstFour <= 3589) {
+        return "JCB";
+      }
+      if (/^(30[0-5]|36|38|39)/.test(digits)) return "Diners Club";
+      if (digits.startsWith("62")) return "UnionPay";
+      return "Otra";
+    };
+    const isValidPaymentMethod = method => {
+      const cardholderName = method?.cardholderName ?? method?.label;
+      return (
+        method
+        && typeof method.id === "string"
+        && method.id.length > 0
+        && typeof cardholderName === "string"
+        && cardholderName.trim().length > 0
+        && cardholderName.length <= 80
+        && paymentBrands.has(method.brand)
+        && typeof method.lastFour === "string"
+        && /^\d{4}$/.test(method.lastFour)
+        && typeof method.isDefault === "boolean"
+      );
+    };
+    const readPaymentMethods = user => {
+      if (!user?.id) return [];
+      const savedMethods = localStorage.getItem(paymentMethodsStorageKey(user.id));
+      if (!savedMethods) return [];
+      let methods;
+      try {
+        methods = JSON.parse(savedMethods);
+      } catch (error) {
+        throw new Error("Los métodos de demostración guardados tienen un formato inválido.", {
+          cause: error,
+        });
+      }
+      if (!Array.isArray(methods) || methods.some(method => !isValidPaymentMethod(method))) {
+        throw new Error("Los métodos de demostración guardados tienen datos inválidos.");
+      }
+      if (methods.length && methods.filter(method => method.isDefault).length !== 1) {
+        throw new Error("Debe haber exactamente un método predeterminado.");
+      }
+      return methods;
+    };
+    const renderCheckoutPaymentMethods = (user, preferredMethodId = "") => {
+      if (checkoutAddPaymentButton) {
+        checkoutAddPaymentButton.disabled = !user?.id;
+      }
+      if (!checkoutPaymentSelect) return;
+      checkoutPaymentSelect.replaceChildren();
+      const emptyOption = document.createElement("option");
+      emptyOption.value = "";
+      emptyOption.textContent = user?.id
+        ? "No hay tarjetas guardadas"
+        : "Inicia sesión para ver tarjetas guardadas";
+      checkoutPaymentSelect.append(emptyOption);
+      checkoutPaymentSelect.disabled = true;
+      if (checkoutPaymentHint) checkoutPaymentHint.textContent = "";
+      if (checkoutSignInLink) checkoutSignInLink.hidden = Boolean(user?.id);
+      if (checkoutManagePaymentsLink) checkoutManagePaymentsLink.hidden = true;
+      if (!user?.id) {
+        if (checkoutPaymentHint) {
+          checkoutPaymentHint.textContent =
+            "Inicia sesión para seleccionar una tarjeta guardada en Forma de Pago.";
+        }
+        return;
+      }
+      try {
+        const methods = readPaymentMethods(user);
+        if (!methods.length) {
+          if (checkoutPaymentHint) {
+            checkoutPaymentHint.textContent =
+              "No hay tarjetas guardadas. Añade una aquí o desde Forma de Pago.";
+          }
+          if (checkoutManagePaymentsLink) checkoutManagePaymentsLink.hidden = false;
+          return;
+        }
+        emptyOption.textContent = "Selecciona una tarjeta";
+        methods.forEach(method => {
+          const option = document.createElement("option");
+          option.value = method.id;
+          option.textContent =
+            `${method.brand} ···· ${method.lastFour} — ${method.cardholderName ?? method.label}` +
+            (method.isDefault ? " (Predeterminada)" : "");
+          checkoutPaymentSelect.append(option);
+        });
+        checkoutPaymentSelect.disabled = false;
+        checkoutPaymentSelect.value =
+          methods.find(method => method.id === preferredMethodId)?.id
+          || methods.find(method => method.isDefault)?.id
+          || "";
+        if (checkoutPaymentHint) {
+          checkoutPaymentHint.textContent =
+            "Solo se muestra la marca, los últimos cuatro dígitos y el nombre de la tarjeta.";
+        }
+      } catch (error) {
+        emptyOption.textContent = "No se pudieron cargar las tarjetas";
+        if (checkoutPaymentHint) {
+          checkoutPaymentHint.textContent =
+            "No se pudieron cargar los métodos de pago guardados en este navegador.";
+        }
+        console.error("No se pudieron cargar las tarjetas para el checkout.", error);
+      }
+    };
+    const fillCheckoutAddress = address => {
+      checkoutAutoFilledAddressId = address?.id || null;
+      Object.entries(checkoutAddressFields).forEach(([key, input]) => {
+        if (input) input.value = address?.[key] || "";
+      });
+    };
+    const renderCheckoutAddresses = user => {
+      if (!checkoutAddressSelect) return;
+      const selectedId = checkoutAddressSelect.value;
+      checkoutAddressSelect.replaceChildren();
+      const emptyOption = document.createElement("option");
+      emptyOption.value = "";
+      if (!user?.id) {
+        emptyOption.textContent = "Inicia sesión para ver direcciones guardadas";
+        checkoutAddressSelect.disabled = true;
+        if (checkoutAddressHint) {
+          checkoutAddressHint.textContent =
+            "También puedes completar la dirección manualmente.";
+        }
+        if (checkoutAddressSignInLink) checkoutAddressSignInLink.hidden = false;
+        if (checkoutAddressManageLink) checkoutAddressManageLink.hidden = true;
+        checkoutAddressSelect.append(emptyOption);
+        return;
+      }
+      if (checkoutAddressSignInLink) checkoutAddressSignInLink.hidden = true;
+      if (checkoutAddressManageLink) checkoutAddressManageLink.hidden = false;
+      if (savedAddressesLoadedUserId !== user.id) {
+        emptyOption.textContent = "Cargando direcciones…";
+        checkoutAddressSelect.disabled = true;
+        checkoutAddressSelect.append(emptyOption);
+        if (checkoutAddressHint) {
+          checkoutAddressHint.textContent = "Cargando tus direcciones guardadas.";
+        }
+        return;
+      }
+      if (savedAddressesLoadError) {
+        emptyOption.textContent = "No se pudieron cargar las direcciones";
+        checkoutAddressSelect.disabled = true;
+        checkoutAddressSelect.append(emptyOption);
+        if (checkoutAddressHint) {
+          checkoutAddressHint.textContent =
+            "No se pudieron cargar tus direcciones guardadas. Puedes completar la dirección manualmente.";
+        }
+        return;
+      }
+      emptyOption.textContent = "Ingresa una dirección nueva";
+      checkoutAddressSelect.append(emptyOption);
+      checkoutAddressSelect.disabled = false;
+      if (!savedAddresses.length) {
+        if (checkoutAddressHint) {
+          checkoutAddressHint.textContent =
+            "Aún no tienes direcciones guardadas. Puedes completarla aquí o guardarla desde Mi Perfil.";
+        }
+        return;
+      }
+      savedAddresses.forEach(address => {
+        const option = document.createElement("option");
+        option.value = address.id;
+        option.textContent =
+          `${address.address_name} — ${address.street} ${address.street_number}, ` +
+          `${address.commune}`;
+        checkoutAddressSelect.append(option);
+      });
+      const selectedAddress = savedAddresses.find(address => address.id === selectedId)
+        || (!checkoutAddressEdited ? savedAddresses[0] : null);
+      if (selectedAddress) {
+        checkoutAddressSelect.value = selectedAddress.id;
+        if (!checkoutAddressEdited) fillCheckoutAddress(selectedAddress);
+      } else {
+        checkoutAddressSelect.value = "";
+      }
+      if (checkoutAddressHint) {
+        checkoutAddressHint.textContent =
+          "Elige una dirección guardada o completa los campos manualmente.";
+      }
+    };
+    const renderProfileAddresses = user => {
+      if (!profileAddressList) return;
+      profileAddressList.replaceChildren();
+      if (profileAddressEmptyMessage) {
+        profileAddressEmptyMessage.textContent = user?.id
+          ? "Aún no has guardado direcciones."
+          : "Inicia sesión para guardar direcciones de envío.";
+        profileAddressEmptyMessage.hidden = Boolean(
+          user?.id
+          && (
+            savedAddressesLoadedUserId !== user.id
+            || savedAddressesLoadError
+            || savedAddresses.length
+          ),
+        );
+      }
+      savedAddresses.forEach(address => {
+        const item = document.createElement("li");
+        item.className = "profile-address-item";
+        const details = document.createElement("div");
+        details.className = "profile-address-details";
+        const name = document.createElement("strong");
+        name.textContent = address.address_name;
+        const summary = document.createElement("span");
+        summary.textContent =
+          `${address.street} ${address.street_number}, ${address.dwelling_type} ` +
+          `${address.dwelling_number}, ${address.commune}, ${address.region}, ` +
+          `${address.postal_code}`;
+        details.append(name, summary);
+        const actions = document.createElement("div");
+        actions.className = "profile-address-item-actions";
+        [["edit", "Editar"], ["delete", "Eliminar"]].forEach(([action, label]) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.dataset.profileAddressAction = action;
+          button.dataset.addressId = address.id;
+          button.setAttribute(
+            "aria-label",
+            `${label} dirección ${address.address_name}`,
+          );
+          button.textContent = label;
+          actions.append(button);
+        });
+        item.append(details, actions);
+        profileAddressList.append(item);
+      });
+    };
+    const loadSavedAddresses = async user => {
+      const { data, error } = await supabaseClient
+        .from("user_addresses")
+        .select(
+          "id, address_name, street, street_number, dwelling_type, dwelling_number, commune, region, postal_code, created_at",
+        )
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      if (signedInUser?.id !== user.id) return;
+      if (error) throw error;
+      if (!Array.isArray(data)) {
+        throw new Error("Supabase devolvió una lista de direcciones inválida.");
+      }
+      savedAddresses = data;
+      savedAddressesLoadedUserId = user.id;
+      savedAddressesLoadError = false;
+      renderProfileAddresses(user);
+      renderCheckoutAddresses(user);
+      if (profileAddressStatus) profileAddressStatus.textContent = "";
+    };
+    const resetProfileAddressForm = () => {
+      profileAddressForm?.reset();
+      if (profileAddressIdInput) profileAddressIdInput.value = "";
+      if (profileAddressSaveButton) {
+        profileAddressSaveButton.textContent = "Guardar dirección";
+      }
+      if (profileAddressCancelButton) profileAddressCancelButton.hidden = true;
+    };
+    const saveProfileAddress = async event => {
+      event.preventDefault();
+      if (!signedInUser?.id || !supabaseClient) {
+        if (profileAddressStatus) {
+          profileAddressStatus.textContent = "Inicia sesión para guardar una dirección.";
+        }
+        return;
+      }
+      if (!profileAddressForm.reportValidity()) return;
+      const address = Object.fromEntries(
+        Object.entries(profileAddressFields).map(([key, input]) => [
+          key,
+          input.value.trim().replace(/\s+/g, " "),
+        ]),
+      );
+      if (Object.values(address).some(value => !value)) {
+        if (profileAddressStatus) {
+          profileAddressStatus.textContent = "Completa todos los campos de la dirección.";
+        }
+        return;
+      }
+      const addressId = profileAddressIdInput?.value;
+      profileAddressSaveButton.disabled = true;
+      try {
+        const result = addressId
+          ? await supabaseClient.from("user_addresses")
+            .update(address)
+            .eq("id", addressId)
+            .eq("user_id", signedInUser.id)
+          : await supabaseClient.from("user_addresses")
+            .insert({ ...address, user_id: signedInUser.id });
+        if (result.error) throw result.error;
+        resetProfileAddressForm();
+        try {
+          await loadSavedAddresses(signedInUser);
+          if (profileAddressStatus) {
+            profileAddressStatus.textContent = addressId
+              ? "Dirección actualizada."
+              : "Dirección guardada.";
+          }
+        } catch (error) {
+          if (profileAddressStatus) {
+            profileAddressStatus.textContent =
+              "La dirección se guardó, pero no se pudo actualizar la lista.";
+          }
+          console.error("No se pudo actualizar la lista de direcciones.", error);
+        }
+      } catch (error) {
+        if (profileAddressStatus) {
+          profileAddressStatus.textContent =
+            `No se pudo guardar la dirección: ${error.message}`;
+        }
+        console.error("No se pudo guardar la dirección de envío.", error);
+      } finally {
+        profileAddressSaveButton.disabled = !signedInUser;
+      }
+    };
+    profileAddressForm?.addEventListener("submit", saveProfileAddress);
+    profileAddressCancelButton?.addEventListener("click", () => {
+      resetProfileAddressForm();
+      if (profileAddressStatus) profileAddressStatus.textContent = "";
+    });
+    profileAddressList?.addEventListener("click", async event => {
+      const button = event.target.closest("[data-profile-address-action]");
+      if (!button || !signedInUser?.id) return;
+      const address = savedAddresses.find(item => item.id === button.dataset.addressId);
+      if (!address) return;
+      if (button.dataset.profileAddressAction === "edit") {
+        Object.entries(profileAddressFields).forEach(([key, input]) => {
+          input.value = address[key] || "";
+        });
+        profileAddressIdInput.value = address.id;
+        profileAddressSaveButton.textContent = "Actualizar dirección";
+        profileAddressCancelButton.hidden = false;
+        if (profileAddressStatus) {
+          profileAddressStatus.textContent = `Editando “${address.address_name}”.`;
+        }
+        profileAddressFields.address_name.focus();
+        return;
+      }
+      if (button.dataset.profileAddressAction !== "delete") return;
+      if (!window.confirm(`¿Eliminar la dirección “${address.address_name}”?`)) return;
+      button.disabled = true;
+      try {
+        const { error } = await supabaseClient
+          .from("user_addresses")
+          .delete()
+          .eq("id", address.id)
+          .eq("user_id", signedInUser.id);
+        if (error) throw error;
+        if (profileAddressIdInput.value === address.id) resetProfileAddressForm();
+        try {
+          await loadSavedAddresses(signedInUser);
+          if (profileAddressStatus) {
+            profileAddressStatus.textContent = "Dirección eliminada.";
+          }
+        } catch (error) {
+          if (profileAddressStatus) {
+            profileAddressStatus.textContent =
+              "La dirección se eliminó, pero no se pudo actualizar la lista.";
+          }
+          console.error("No se pudo actualizar la lista de direcciones.", error);
+        }
+      } catch (error) {
+        if (profileAddressStatus) {
+          profileAddressStatus.textContent =
+            `No se pudo eliminar la dirección: ${error.message}`;
+        }
+        console.error("No se pudo eliminar la dirección de envío.", error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    checkoutAddressSelect?.addEventListener("change", () => {
+      const address = savedAddresses.find(
+        item => item.id === checkoutAddressSelect.value,
+      );
+      if (address) {
+        checkoutAddressEdited = false;
+        fillCheckoutAddress(address);
+      } else {
+        checkoutAddressEdited = true;
+        fillCheckoutAddress(null);
+      }
+    });
+    Object.values(checkoutAddressFields).forEach(input => {
+      input?.addEventListener("input", () => {
+        checkoutAddressEdited = true;
+        checkoutAutoFilledAddressId = null;
+        if (checkoutAddressSelect?.value) checkoutAddressSelect.value = "";
+      });
+    });
+    renderCheckoutPaymentMethods(null);
+    renderCheckoutAddresses(null);
+    const savePaymentMethods = (user, methods) => {
+      if (!user?.id) throw new Error("Inicia sesión para administrar tus métodos locales.");
+      localStorage.setItem(
+        paymentMethodsStorageKey(user.id),
+        JSON.stringify(methods),
+      );
+    };
+    const formatPaymentCardNumberInput = input => {
+      const caretPosition = input.selectionStart ?? input.value.length;
+      const digitsBeforeCaret = input.value
+        .slice(0, caretPosition)
+        .replace(/\D/g, "")
+        .length;
+      const digits = input.value.replace(/\D/g, "").slice(0, 16);
+      input.value = digits.replace(/(\d{4})(?=\d)/g, "$1 ");
+      if (document.activeElement === input) {
+        const newPosition = digitsBeforeCaret
+          ? digitsBeforeCaret + Math.floor((digitsBeforeCaret - 1) / 4)
+          : 0;
+        input.setSelectionRange(newPosition, newPosition);
+      }
+    };
+    const formatPaymentExpirationInput = input => {
+      const caretPosition = input.selectionStart ?? input.value.length;
+      const digitsBeforeCaret = input.value
+        .slice(0, caretPosition)
+        .replace(/\D/g, "")
+        .length;
+      const digits = input.value.replace(/\D/g, "").slice(0, 4);
+      input.value = digits.length > 2
+        ? `${digits.slice(0, 2)}/${digits.slice(2)}`
+        : digits;
+      if (document.activeElement === input) {
+        const separatorPosition = digitsBeforeCaret > 2 ? 1 : 0;
+        const newPosition = Math.min(
+          input.value.length,
+          digitsBeforeCaret + separatorPosition,
+        );
+        input.setSelectionRange(newPosition, newPosition);
+      }
+    };
+    const isValidPaymentExpiration = value => {
+      const match = /^(0[1-9]|1[0-2])\/(\d{2})$/.exec(value);
+      if (!match) return false;
+      const month = Number(match[1]);
+      const year = 2000 + Number(match[2]);
+      const now = new Date();
+      return year > now.getFullYear()
+        || (year === now.getFullYear() && month >= now.getMonth() + 1);
+    };
+    const updatePaymentCardPreview = () => {
+      const digits = paymentCardNumberInput?.value.replace(/\D/g, "").slice(0, 16) || "";
+      const brand = detectPaymentBrand(digits);
+      if (paymentDetectedBrand) {
+        paymentDetectedBrand.textContent = brand || "Se detecta al ingresar el número";
+      }
+      if (paymentPreviewBrand) paymentPreviewBrand.textContent = brand || "Tarjeta";
+      if (paymentPreviewNumber) {
+        const lastFour = digits.slice(-4).padStart(4, "*");
+        paymentPreviewNumber.textContent = `**** **** **** ${lastFour}`;
+      }
+      if (paymentPreviewExpiration) {
+        paymentPreviewExpiration.textContent = paymentExpirationInput?.value || "MM/AA";
+      }
+      if (paymentPreviewHolder) {
+        paymentPreviewHolder.textContent = paymentCardholderInput?.value.trim().toUpperCase()
+          || "NOMBRE EN LA TARJETA";
+      }
+      if (paymentCardNumberInput) {
+        paymentCardNumberInput.setCustomValidity(
+          !digits || digits.length === 16
+            ? ""
+            : "El número de tarjeta debe tener 16 dígitos.",
+        );
+      }
+      if (paymentExpirationInput) {
+        paymentExpirationInput.setCustomValidity(
+          !paymentExpirationInput.value || isValidPaymentExpiration(paymentExpirationInput.value)
+            ? ""
+            : "Ingresa un mes y año vigentes en formato MM/AA.",
+        );
+      }
+      if (paymentCvvInput) {
+        paymentCvvInput.setCustomValidity(
+          !paymentCvvInput.value || /^\d{3}$/.test(paymentCvvInput.value)
+            ? ""
+            : "El código de seguridad debe tener 3 dígitos.",
+        );
+      }
+      if (paymentCardholderInput) {
+        paymentCardholderInput.setCustomValidity(
+          paymentCardholderInput.value.trim()
+            ? ""
+            : "Escribe el nombre en la tarjeta.",
+        );
+      }
+    };
+    const clearPaymentForm = () => {
+      paymentForm?.reset();
+      updatePaymentCardPreview();
+    };
+    paymentDialog?.addEventListener("close", () => {
+      clearPaymentForm();
+      paymentDialogOpenedFromCheckout = false;
+    });
+    paymentCardNumberInput?.addEventListener("input", () => {
+      formatPaymentCardNumberInput(paymentCardNumberInput);
+      updatePaymentCardPreview();
+    });
+    paymentExpirationInput?.addEventListener("input", () => {
+      formatPaymentExpirationInput(paymentExpirationInput);
+      updatePaymentCardPreview();
+    });
+    paymentCvvInput?.addEventListener("input", () => {
+      paymentCvvInput.value = paymentCvvInput.value.replace(/\D/g, "").slice(0, 3);
+      updatePaymentCardPreview();
+    });
+    paymentCardholderInput?.addEventListener("input", updatePaymentCardPreview);
+    updatePaymentCardPreview();
     let latestSelectedPhoto;
     let pendingPhotoRemember;
     let rememberedPhotoPath;
@@ -1213,7 +1975,7 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       profilePhoneInput, profileBustInput, profileWaistInput, profileHipInput,
     ].filter(Boolean);
     const requestedReturnView = new URLSearchParams(window.location.search).get("return_view");
-    let authReturnView = ["storefront", "home", "try-on", "profile"].includes(requestedReturnView)
+    let authReturnView = ["storefront", "home", "try-on", "profile", "checkout"].includes(requestedReturnView)
       ? requestedReturnView
       : "storefront";
     let returnToHomeAfterSignIn = false;
@@ -1253,6 +2015,221 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
         .join(" ");
       profileGreeting.textContent = fullName ? `Bienvenido\n${fullName}` : "Bienvenido";
     };
+    const renderPaymentMethods = user => {
+      if (!paymentMethodsList) return;
+      paymentMethodsList.replaceChildren();
+      if (paymentStatus) paymentStatus.textContent = "";
+      if (!user?.id) {
+        if (paymentAddButton) paymentAddButton.disabled = true;
+        if (paymentEmptyMessage) {
+          paymentEmptyMessage.hidden = false;
+          paymentEmptyMessage.textContent = "Inicia sesión para ver los métodos guardados en este navegador.";
+        }
+        return;
+      }
+      if (paymentAddButton) paymentAddButton.disabled = false;
+      try {
+        const methods = readPaymentMethods(user);
+        if (paymentEmptyMessage) {
+          paymentEmptyMessage.hidden = methods.length > 0;
+          paymentEmptyMessage.textContent = "Aún no has añadido tarjetas.";
+        }
+        methods.forEach(method => {
+          const item = document.createElement("li");
+          item.className = "profile-payment-method";
+          const details = document.createElement("div");
+          details.className = "profile-payment-method-details";
+          const brand = document.createElement("span");
+          brand.className = "profile-payment-brand";
+          brand.textContent = method.brand;
+          const card = document.createElement("strong");
+          card.className = "profile-payment-card-number";
+          card.textContent = `**** **** **** ${method.lastFour}`;
+          const cardholder = document.createElement("span");
+          cardholder.className = "profile-payment-cardholder";
+          cardholder.textContent = method.cardholderName ?? method.label;
+          details.append(brand, card, cardholder);
+          if (method.isDefault) {
+            const defaultLabel = document.createElement("span");
+            defaultLabel.className = "profile-payment-default";
+            defaultLabel.textContent = "Predeterminada";
+            details.append(defaultLabel);
+          }
+          const actions = document.createElement("div");
+          actions.className = "profile-payment-method-actions";
+          if (!method.isDefault) {
+            const defaultButton = document.createElement("button");
+            defaultButton.className = "matices-button";
+            defaultButton.type = "button";
+            defaultButton.dataset.paymentAction = "default";
+            defaultButton.dataset.paymentMethodId = method.id;
+            defaultButton.textContent = "Seleccionar como predeterminada";
+            actions.append(defaultButton);
+          }
+          const removeButton = document.createElement("button");
+          removeButton.className = "matices-button";
+          removeButton.type = "button";
+          removeButton.dataset.paymentAction = "remove";
+          removeButton.dataset.paymentMethodId = method.id;
+          removeButton.textContent = "Eliminar";
+          removeButton.setAttribute(
+            "aria-label",
+            `Eliminar ${method.brand} terminada en ${method.lastFour}`,
+          );
+          actions.append(removeButton);
+          item.append(details, actions);
+          paymentMethodsList.append(item);
+        });
+      } catch (error) {
+        if (paymentEmptyMessage) paymentEmptyMessage.hidden = true;
+        if (paymentStatus) {
+          paymentStatus.textContent = "No se pudieron cargar los métodos guardados en este navegador.";
+        }
+        console.error("No se pudieron cargar los métodos de pago locales.", error);
+      }
+    };
+    const openPaymentDialog = openedFromCheckout => {
+      if (!signedInUser?.id || !paymentDialog || !paymentForm) {
+        const status = openedFromCheckout ? checkoutPaymentHint : paymentStatus;
+        if (status) status.textContent = "Inicia sesión para administrar métodos locales.";
+        return;
+      }
+      paymentDialogOpenedFromCheckout = openedFromCheckout;
+      const status = openedFromCheckout ? checkoutPaymentHint : paymentStatus;
+      if (status) status.textContent = "";
+      clearPaymentForm();
+      paymentDialog.showModal();
+      paymentCardNumberInput?.focus();
+    };
+    paymentAddButton?.addEventListener("click", () => {
+      openPaymentDialog(false);
+    });
+    checkoutAddPaymentButton?.addEventListener("click", () => {
+      openPaymentDialog(true);
+    });
+    paymentCancelButton?.addEventListener("click", () => paymentDialog?.close());
+    paymentForm?.addEventListener("submit", event => {
+      event.preventDefault();
+      const openedFromCheckout = paymentDialogOpenedFromCheckout;
+      const status = openedFromCheckout ? checkoutPaymentHint : paymentStatus;
+      if (!signedInUser?.id) {
+        if (status) status.textContent = "Inicia sesión para guardar métodos locales.";
+        if (paymentDialog?.open) paymentDialog.close();
+        else clearPaymentForm();
+        return;
+      }
+      updatePaymentCardPreview();
+      if (!paymentForm.reportValidity()) return;
+      const cardNumber = paymentCardNumberInput?.value.replace(/\D/g, "") || "";
+      const cardholderName = paymentCardholderInput?.value.trim().replace(/\s+/g, " ") || "";
+      const brand = detectPaymentBrand(cardNumber);
+      if (cardNumber.length !== 16 || !paymentBrands.has(brand)) {
+        paymentForm.reportValidity();
+        return;
+      }
+      try {
+        const methods = readPaymentMethods(signedInUser);
+        const paymentMethodId = crypto.randomUUID();
+        methods.push({
+          id: paymentMethodId,
+          brand,
+          lastFour: cardNumber.slice(-4),
+          cardholderName,
+          isDefault: methods.length === 0,
+        });
+        savePaymentMethods(signedInUser, methods);
+        renderPaymentMethods(signedInUser);
+        renderCheckoutPaymentMethods(
+          signedInUser,
+          openedFromCheckout ? paymentMethodId : "",
+        );
+        if (paymentDialog?.open) paymentDialog.close();
+        else clearPaymentForm();
+        if (status) {
+          status.textContent =
+            "Tarjeta de demostración guardada: solo se conservan la marca, el nombre y los últimos cuatro dígitos.";
+        }
+      } catch (error) {
+        if (status) status.textContent = `No se pudo guardar el método local: ${error.message}`;
+        console.error("No se pudo guardar el método de pago local.", error);
+        if (paymentDialog?.open) paymentDialog.close();
+        else clearPaymentForm();
+      }
+    });
+    paymentMethodsList?.addEventListener("click", event => {
+      const target = event.target instanceof Element
+        ? event.target.closest("[data-payment-action]")
+        : null;
+      if (!target || !paymentMethodsList.contains(target) || !signedInUser?.id) return;
+      const methodId = target.dataset.paymentMethodId;
+      const action = target.dataset.paymentAction;
+      try {
+        const methods = readPaymentMethods(signedInUser);
+        const selectedMethod = methods.find(method => method.id === methodId);
+        if (!selectedMethod) throw new Error("No se encontró el método seleccionado.");
+        if (action === "remove") {
+          if (!window.confirm(`¿Eliminar ${selectedMethod.brand} terminada en ${selectedMethod.lastFour}?`)) {
+            return;
+          }
+          const remainingMethods = methods.filter(method => method.id !== methodId);
+          if (selectedMethod.isDefault && remainingMethods.length > 0) {
+            remainingMethods[0].isDefault = true;
+          }
+          savePaymentMethods(signedInUser, remainingMethods);
+          renderPaymentMethods(signedInUser);
+          renderCheckoutPaymentMethods(signedInUser);
+          if (paymentStatus) paymentStatus.textContent = "Método de demostración eliminado.";
+          return;
+        }
+        if (action !== "default") return;
+        savePaymentMethods(
+          signedInUser,
+          methods.map(method => ({ ...method, isDefault: method.id === methodId })),
+        );
+        renderPaymentMethods(signedInUser);
+        renderCheckoutPaymentMethods(signedInUser);
+        if (paymentStatus) paymentStatus.textContent = "Método predeterminado actualizado.";
+      } catch (error) {
+        if (paymentStatus) paymentStatus.textContent = `No se pudo actualizar el método local: ${error.message}`;
+        console.error("No se pudo actualizar el método de pago local.", error);
+      }
+    });
+    checkoutForm?.addEventListener("submit", event => {
+      event.preventDefault();
+      if (!checkoutForm.reportValidity()) return;
+      if (!signedInUser?.id) {
+        if (checkoutStatus) {
+          checkoutStatus.textContent =
+            "Inicia sesión para seleccionar una tarjeta guardada.";
+        }
+        return;
+      }
+      try {
+        const methods = readPaymentMethods(signedInUser);
+        const selectedMethod = methods.find(
+          method => method.id === checkoutPaymentSelect?.value,
+        );
+        if (!selectedMethod) {
+          if (checkoutStatus) {
+            checkoutStatus.textContent =
+              "Selecciona una tarjeta guardada antes de continuar.";
+          }
+          checkoutPaymentSelect?.focus();
+          return;
+        }
+        if (checkoutStatus) {
+          checkoutStatus.textContent =
+            `Pedido de demostración listo con ${selectedMethod.brand} terminada en ` +
+            `${selectedMethod.lastFour}. No se realizó ningún cobro ni se creó una orden.`;
+        }
+      } catch (error) {
+        if (checkoutStatus) {
+          checkoutStatus.textContent =
+            "No se pudo validar la tarjeta guardada en este navegador.";
+        }
+        console.error("No se pudo validar el método de pago del checkout.", error);
+      }
+    });
     const setAuthControls = user => {
       window.calceAuthenticated = Boolean(user);
       authForm.hidden = Boolean(user);
@@ -1263,9 +2240,26 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       profileAccountLink.hidden = !user;
       if (profileFavoritesLink) profileFavoritesLink.hidden = !user;
       profilePaymentLink.hidden = !user;
+      if (profileAddressLink) profileAddressLink.hidden = !user;
+      renderPaymentMethods(user);
+      renderCheckoutPaymentMethods(user);
+      if (!user) {
+        savedAddresses = [];
+        savedAddressesLoadedUserId = null;
+        savedAddressesLoadError = false;
+        resetProfileAddressForm();
+        if (profileAddressStatus) profileAddressStatus.textContent = "";
+      } else if (profileAddressStatus) {
+        profileAddressStatus.textContent = "Cargando direcciones…";
+      }
+      profileAddressForm?.querySelectorAll("input, select, button").forEach(control => {
+        control.disabled = !user;
+      });
+      renderProfileAddresses(user);
+      renderCheckoutAddresses(user);
       profileEmail.hidden = !user;
       profileEmail.textContent = user?.email || "Cuenta activa";
-      navAccountLinks.hidden = Boolean(user);
+      updateNavAccountLinks();
       profileFields.forEach(field => { field.disabled = !user; });
       if (rememberCheckbox) rememberCheckbox.disabled = !user;
       if (rememberPhotoInput) rememberPhotoInput.disabled = !user;
@@ -1613,9 +2607,16 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       const userId = user?.id ?? null;
       if (userId === activeUserId) return;
       const previousUserId = activeUserId;
+      if (checkoutAutoFilledAddressId || previousUserId) {
+        fillCheckoutAddress(null);
+        checkoutAddressEdited = false;
+      }
       activeUserId = userId;
       profileLoadedUserId = null;
       signedInUser = user;
+      savedAddresses = [];
+      savedAddressesLoadedUserId = null;
+      savedAddressesLoadError = false;
       setAuthControls(user);
       if (!user) {
         if (previousUserId) {
@@ -1637,6 +2638,22 @@ document.querySelectorAll('form[action="/"]').forEach(form => {
       showAccountStatus(`Sesión iniciada como ${user.email || "usuario"}. Recuperando perfil…`);
       const hasProfile = await loadProfile(user);
       profileLoadedUserId = user.id;
+      try {
+        await loadSavedAddresses(user);
+      } catch (error) {
+        if (signedInUser?.id !== user.id) return;
+        savedAddresses = [];
+        savedAddressesLoadedUserId = user.id;
+        savedAddressesLoadError = true;
+        renderProfileAddresses(user);
+        renderCheckoutAddresses(user);
+        if (profileAddressStatus) {
+          profileAddressStatus.textContent =
+            "No se pudieron cargar las direcciones. Revisa la configuración de Supabase.";
+        }
+        console.error("No se pudieron cargar las direcciones de envío.", error);
+      }
+      if (signedInUser?.id !== user.id) return;
       if (pendingPhotoRemember) {
         rememberCheckbox.checked = true;
         rememberPhotoInput.checked = true;
@@ -2126,7 +3143,6 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const catalogViewActive = Boolean(catalogPagePanel && !catalogPagePanel.hidden);
   if (searchForm && catalogViewActive) {
     searchForm.classList.add("catalog-search-form--catalog");
-    catalog.querySelector(".catalog-main")?.prepend(searchForm);
   }
 
   if (
@@ -2151,6 +3167,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const updateSelection = () => {
     const count = selectedCatalogGarments.size;
     if (selectionBar) selectionBar.hidden = count === 0;
+    catalog.classList.toggle("has-selection", count > 0);
     selectionStatus.textContent = count
       ? `${count} ${count === 1 ? "prenda seleccionada" : "prendas seleccionadas"} para el Probador`
       : "Ninguna prenda seleccionada";
@@ -2167,6 +3184,22 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       maxPriceFilter,
     ].filter(filter => filter.value.trim()).length;
     if (filterCount) filterCount.textContent = String(activeFilters);
+  };
+
+  const validateCatalogPriceRange = () => {
+    const minimum = minPriceFilter.value.trim();
+    const maximum = maxPriceFilter.value.trim();
+    const inverted = minimum && maximum && Number(minimum) > Number(maximum);
+    const message = inverted
+      ? "El precio mínimo no puede ser mayor que el precio máximo."
+      : "";
+    minPriceFilter.setCustomValidity(message);
+    maxPriceFilter.setCustomValidity(message);
+    minPriceFilter.setAttribute("aria-invalid", String(Boolean(message)));
+    maxPriceFilter.setAttribute("aria-invalid", String(Boolean(message)));
+    if (applyFiltersButton) applyFiltersButton.disabled = Boolean(message);
+    if (message) resultCount.textContent = message;
+    return !message;
   };
 
   const updateHeading = () => {
@@ -2453,6 +3486,14 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       }
       const data = await readJsonResponse(response, "Catálogo");
       if (requestId !== requestNumber) return;
+      for (const key of ["search", "type", "size", "brand", "min_price", "max_price"]) {
+        if (!params.get(key)?.trim()) params.delete(key);
+      }
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}?${params.toString()}${window.location.hash}`,
+      );
       const template = document.createElement("template");
       template.innerHTML = data.cards;
       itemsContainer.replaceChildren(template.content);
@@ -2480,8 +3521,12 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   [typeFilter, sizeFilter, brandFilter, minPriceFilter, maxPriceFilter].forEach(filter => {
     filter.addEventListener("change", () => {
       updateFilterSummary();
+      if (!validateCatalogPriceRange()) return;
       loadPage(0);
     });
+  });
+  [minPriceFilter, maxPriceFilter].forEach(filter => {
+    filter.addEventListener("input", validateCatalogPriceRange);
   });
   openFiltersButton?.addEventListener("click", () => {
     filtersDialog?.showModal();
@@ -2493,6 +3538,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     [typeFilter, sizeFilter, brandFilter, minPriceFilter, maxPriceFilter].forEach(filter => {
       filter.value = "";
     });
+    validateCatalogPriceRange();
     updateFilterSummary();
     loadPage(0);
   });
@@ -2506,6 +3552,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     button.addEventListener("click", () => setCatalogView(button.dataset.catalogView));
   });
   updateFilterSummary();
+  validateCatalogPriceRange();
   if (applyFiltersButton) {
     updateResultTotal(Number(applyFiltersButton.dataset.catalogTotal) || 0);
   }
@@ -2528,8 +3575,16 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     loadPage(currentPage + 1);
     catalog.scrollIntoView({ behavior: "smooth", block: "start" });
   });
-  tryOnButton.addEventListener("click", () => {
+  tryOnButton.addEventListener("click", async () => {
     if (!selectedCatalogGarments.size) return;
+    tryOnButton.disabled = true;
+    const photoSaved = await tryOnPhotoSavePromise;
+    if (!photoSaved) {
+      resultCount.textContent =
+        "No se pudo preparar la foto para el Probador. Vuelve a Inicio y selecciónala nuevamente.";
+      updateSelection();
+      return;
+    }
     window.location.assign(
       document.getElementById("try-on-link")?.href || "/?view=try-on",
     );
@@ -2641,6 +3696,43 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const tryOnResult = tryOnPanel?.querySelector("[data-vton-result]");
   const tryOnResultImage = tryOnPanel?.querySelector("[data-vton-result-image]");
   const tryOnResultStatus = tryOnPanel?.querySelector("[data-vton-result-status]");
+  const tryOnRecommendationCards = Array.from(
+    tryOnPanel?.querySelectorAll("[data-try-on-recommendations-outfits] > .storefront-outfit") || [],
+  );
+  let activeTryOnRecommendations = [];
+  let activeTryOnRecommendationPage = 0;
+  const tryOnRecommendationsPerPage = 2;
+  const showTryOnRecommendationPage = page => {
+    if (!activeTryOnRecommendations.length) return;
+    const pageCount = Math.ceil(
+      activeTryOnRecommendations.length / tryOnRecommendationsPerPage,
+    );
+    activeTryOnRecommendationPage = (page + pageCount) % pageCount;
+    const firstCard = activeTryOnRecommendationPage * tryOnRecommendationsPerPage;
+    tryOnRecommendationCards.forEach(card => {
+      const cardIndex = activeTryOnRecommendations.indexOf(card);
+      const isActive = cardIndex >= firstCard
+        && cardIndex < firstCard + tryOnRecommendationsPerPage;
+      card.hidden = !isActive;
+      card.setAttribute("aria-hidden", String(!isActive));
+    });
+  };
+  if (tryOnRecommendationCards.length) {
+    const shuffled = [...tryOnRecommendationCards];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    activeTryOnRecommendations = shuffled.slice(
+      0,
+      Math.min(tryOnRecommendationsPerPage * 2, shuffled.length),
+    );
+    showTryOnRecommendationPage(0);
+  }
+  tryOnPanel?.querySelector("[data-try-on-recommendations-previous]")
+    ?.addEventListener("click", () => showTryOnRecommendationPage(activeTryOnRecommendationPage - 1));
+  tryOnPanel?.querySelector("[data-try-on-recommendations-next]")
+    ?.addEventListener("click", () => showTryOnRecommendationPage(activeTryOnRecommendationPage + 1));
 
   const updateTryOnProviderHelp = () => {
     if (!tryOnProviderSelect || !tryOnProviderHelp) return;
@@ -2650,6 +3742,8 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
       datatobiz: "DataToBiz admite una sola prenda superior.",
       diffusion: "Try-On Diffusion procesa una prenda por solicitud; no combina prendas.",
       refiner: "Genera primero con Try on Clothes Pro y luego refina; ambas APIs deben estar activas.",
+      vton4: "Virtual Try On 4 procesa una prenda por solicitud.",
+      clothing_tryon: "Clothing Try-On API procesa una prenda superior, inferior o vestido por solicitud.",
     };
     tryOnProviderHelp.textContent = helpText[tryOnProviderSelect.value] || helpText.automatic;
     if (tryOnGenderField) {
@@ -2668,7 +3762,6 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   let currentPalette = [];
   let currentStep = 1;
   let selectedPhoto = null;
-  let tryOnPhotoSavePromise = Promise.resolve(true);
   let cameraStream = null;
   let tryOnPageInitialized = false;
   let tryOnPersonObjectUrl;
@@ -3277,8 +4370,30 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
   const initializeTryOnPage = () => {
     if (!tryOnPagePanel || tryOnPagePanel.hidden || tryOnPageInitialized) return;
     tryOnPageInitialized = true;
-    syncTryOnPhoto();
-    void loadInitialTryOnProducts();
+    void Promise.resolve().then(async () => {
+      try {
+        const savedPhoto = await loadTryOnPhotoForSession();
+        if (savedPhoto) {
+          if (
+            savedPhoto.blob instanceof Blob
+            && Number.isFinite(savedPhoto.expiresAt)
+            && savedPhoto.expiresAt > Date.now()
+          ) {
+            selectedPhoto = savedPhoto.blob;
+          } else {
+            await removeTryOnPhotoForSession();
+            tryOnStatus.textContent =
+              "La foto de Inicio venció o no se pudo leer. Selecciona una foto nueva.";
+          }
+        }
+      } catch (error) {
+        tryOnStatus.textContent =
+          "No se pudo recuperar la foto para el Probador. Vuelve a Inicio y selecciónala nuevamente.";
+        console.error("No se pudo recuperar la foto de la sesión.", error);
+      }
+      syncTryOnPhoto();
+      void loadInitialTryOnProducts();
+    });
   };
   window.addEventListener("calce:protected-page-visible", event => {
     if (event.detail?.view === "try-on") initializeTryOnPage();
@@ -3372,6 +4487,8 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
         datatobiz: "Generando directamente con DataToBiz…",
         diffusion: "Generando directamente con Try-On Diffusion…",
         refiner: "Generando y refinando con dos APIs…",
+        vton4: "Generando directamente con Virtual Try On 4…",
+        clothing_tryon: "Generando directamente con Clothing Try-On API…",
       };
       tryOnStatus.textContent = providerStatus[provider] || providerStatus.automatic;
       const response = await fetch("/api/try-on", {
@@ -3732,6 +4849,7 @@ document.querySelectorAll("[data-garment-catalog]").forEach(catalog => {
     wizard.classList.remove("is-account-view");
     wizard.closest("#home-panel")?.classList.remove("is-account-view");
     if (accountPanel) accountPanel.hidden = true;
+    window.dispatchEvent(new CustomEvent("calce:close-account"));
     if (currentStep !== 1) stopCamera();
     panels.forEach(panel => {
       panel.hidden = Number(panel.dataset.wizardPanel) !== currentStep;

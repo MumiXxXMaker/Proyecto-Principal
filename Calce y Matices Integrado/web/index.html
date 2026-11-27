@@ -8,7 +8,7 @@
   <meta name="supabase-publishable-key" content="{supabase_publishable_key}">
   <title>Calce Wardrobe</title>
   <link rel="icon" type="image/png" href="/assets/calce-isotipo.png">
-  <link rel="stylesheet" href="/styles.css?v=paris-out-of-stock-1">
+  <link rel="stylesheet" href="/styles.css?v=try-on-result-frame-2">
 </head>
 <body>
   <header><div class="wrap nav">
@@ -36,7 +36,7 @@
         </svg>
         <span class="cart-count" data-cart-count hidden>0</span>
       </a>
-      <div class="nav-account-links">
+      <div class="nav-account-links"{nav_account_links_hidden}>
         <a class="nav-auth-button" href="{sign_in_url}" data-open-account="sign-in"{sign_in_link_current}>Iniciar sesión</a>
         <a class="nav-auth-button nav-auth-button-primary" href="{sign_up_url}" data-open-account="sign-up"{sign_up_link_current}>Crear cuenta</a>
       </div>
@@ -57,6 +57,7 @@
             {favorites_link_current} hidden>Favoritos</a>
           <a href="/?view=profile#profile-account-data" data-profile-account hidden>Datos de Cuenta</a>
           <a href="/?view=profile#profile-payment" data-profile-payment hidden>Forma de Pago</a>
+          <a href="/?view=profile#profile-address" data-profile-address hidden>Dirección</a>
           <a href="/?view=home" data-profile-edit hidden>Tu Calce</a>
           <button type="button" data-supabase-sign-out hidden>Cerrar sesión</button>
         </div>
@@ -285,6 +286,25 @@
             <p class="sub">Revisa las prendas antes de continuar.</p>
           </div>
         </header>
+        <dialog class="cart-recommendations-dialog" data-cart-recommendations-dialog
+          aria-labelledby="cart-recommendations-title">
+          <div class="cart-recommendations-content">
+            <button class="cart-recommendations-close" type="button"
+              data-cart-recommendations-close aria-label="Cerrar recomendaciones">×</button>
+            <span class="eyebrow">Elegidas para ti</span>
+            <h2 id="cart-recommendations-title">Tus Recomendados</h2>
+            <div class="cart-recommendations-carousel" data-cart-recommendations-carousel>
+              <button class="cart-recommendations-arrow" type="button"
+                data-cart-recommendations-previous aria-label="Ver conjunto anterior">‹</button>
+              <div class="cart-recommendations-outfits" data-cart-recommendations-outfits
+                aria-live="polite">{cart_recommendations}</div>
+              <button class="cart-recommendations-arrow" type="button"
+                data-cart-recommendations-next aria-label="Ver conjunto siguiente">›</button>
+            </div>
+            <button class="matices-button matices-button-primary cart-recommendations-decline" type="button"
+              data-cart-recommendations-decline>No, gracias</button>
+          </div>
+        </dialog>
         <div class="cart-empty" data-cart-empty hidden>
           <p>Tu carrito está vacío.</p>
           <a class="matices-button matices-button-primary" href="{catalog_tab_url}">
@@ -296,14 +316,107 @@
             <h2>Resumen</h2>
             <p><span>Productos</span><strong data-cart-item-count>0</strong></p>
             <p><span>Total referencial</span><strong data-cart-total>—</strong></p>
-            <button class="matices-button matices-button-primary" type="button"
-              data-cart-confirm>Confirmar selección</button>
-            <p class="cart-payment-note">Esta confirmación no reserva productos ni procesa pagos.
-              Para completar la compra, revisa disponibilidad y paga en la tienda de cada prenda.</p>
-            <p class="cart-confirmation" data-cart-confirmation role="status"
-              aria-live="polite" hidden></p>
+            <a class="matices-button matices-button-primary"
+              href="/?view=checkout" data-cart-checkout>Confirmar Pago</a>
+            <p class="cart-payment-note">El proceso es demostrativo: no se reservan productos
+              ni se procesan pagos.</p>
           </aside>
         </div>
+      </div>
+    </section>
+    <section id="checkout-panel" data-page-panel="checkout"{checkout_panel_hidden}>
+      <div class="wrap checkout-page">
+        <header class="cart-heading">
+          <div>
+            <span class="eyebrow">Datos para tu pedido</span>
+            <h1>Confirmar Pago</h1>
+            <p class="sub">Ingresa la dirección de entrega y selecciona una tarjeta guardada.</p>
+          </div>
+        </header>
+        <p class="checkout-demo-notice">
+          Demostración local: no se realiza ningún cobro. Guarda tus direcciones desde Mi Perfil.
+        </p>
+        <form class="checkout-form" data-checkout-form>
+          <section class="checkout-card" aria-labelledby="checkout-address-title">
+            <h2 id="checkout-address-title">Dirección de entrega</h2>
+            <label class="checkout-saved-address-label" for="checkout-saved-address">
+              Dirección guardada
+            </label>
+            <select id="checkout-saved-address" data-checkout-address-select>
+              <option value="">Ingresa una dirección nueva</option>
+            </select>
+            <p class="checkout-payment-hint" data-checkout-address-hint
+              role="status" aria-live="polite"></p>
+            <a class="checkout-payment-link" data-checkout-address-sign-in
+              href="/?view=account&amp;auth_mode=sign-in&amp;return_view=checkout" hidden>
+              Inicia sesión para ver tus direcciones</a>
+            <a class="checkout-payment-link" data-checkout-address-manage
+              href="/?view=profile&amp;return_view=checkout#profile-address" hidden>
+              Administrar direcciones</a>
+            <div class="checkout-fields">
+              <label for="checkout-street">Calle
+                <input id="checkout-street" name="street" type="text"
+                  autocomplete="address-line1" maxlength="120" required>
+              </label>
+              <label for="checkout-street-number">Número
+                <input id="checkout-street-number" name="streetNumber" type="text"
+                  inputmode="numeric" autocomplete="address-line2" maxlength="20" required>
+              </label>
+              <label for="checkout-dwelling-type">Tipo de vivienda
+                <select id="checkout-dwelling-type" name="dwellingType" required>
+                  <option value="">Selecciona una opción</option>
+                  <option value="casa">Casa</option>
+                  <option value="departamento">Departamento</option>
+                  <option value="condominio">Condominio</option>
+                  <option value="oficina">Oficina</option>
+                  <option value="otro">Otro</option>
+                </select>
+              </label>
+              <label for="checkout-dwelling-number">Número de vivienda
+                <input id="checkout-dwelling-number" name="dwellingNumber" type="text"
+                  maxlength="30" required>
+              </label>
+              <label for="checkout-commune">Comuna
+                <input id="checkout-commune" name="commune" type="text"
+                  autocomplete="address-level2" maxlength="80" required>
+              </label>
+              <label for="checkout-region">Región
+                <input id="checkout-region" name="region" type="text"
+                  autocomplete="address-level1" maxlength="80" required>
+              </label>
+              <label for="checkout-postal-code">Código postal (ZIP)
+                <input id="checkout-postal-code" name="postalCode" type="text"
+                  inputmode="numeric" autocomplete="postal-code" maxlength="12" required>
+              </label>
+            </div>
+          </section>
+          <section class="checkout-card checkout-payment-card"
+            aria-labelledby="checkout-payment-title">
+            <h2 id="checkout-payment-title">Método de pago</h2>
+            <label for="checkout-payment-method">Tarjeta guardada</label>
+            <select id="checkout-payment-method" name="paymentMethod"
+              data-checkout-payment-select required>
+              <option value="">Cargando tarjetas guardadas…</option>
+            </select>
+            <button class="matices-button matices-button-primary checkout-add-payment-button"
+              type="button" data-checkout-payment-add disabled>Añadir tarjeta</button>
+            <p class="checkout-payment-hint" data-checkout-payment-hint
+              role="status" aria-live="polite"></p>
+            <a class="checkout-payment-link" data-checkout-sign-in
+              href="/?view=account&amp;auth_mode=sign-in&amp;return_view=checkout" hidden>
+              Iniciar sesión para ver tarjetas</a>
+            <a class="checkout-payment-link" data-checkout-manage
+              href="/?view=profile&amp;return_view=checkout#profile-payment" hidden>
+              Administrar formas de pago</a>
+            <div class="checkout-actions">
+              <a class="matices-button" href="/?view=cart">Volver al carrito</a>
+              <button class="matices-button matices-button-primary" type="submit">
+                Confirmar pedido de demostración</button>
+            </div>
+            <p class="checkout-status" data-checkout-status role="status"
+              aria-live="polite"></p>
+          </section>
+        </form>
       </div>
     </section>
     <section id="favorites-panel" data-page-panel="favorites"{favorites_panel_hidden}>
@@ -331,8 +444,20 @@
     </section>
     <section id="profile-panel" data-page-panel="profile"{profile_panel_hidden}>
       <div class="profile-page" data-profile-page>
-        <section id="profile-account-data" class="profile-card"
-          aria-labelledby="profile-account-title">
+        <div class="profile-tabs" role="tablist" aria-label="Secciones de Mi Perfil">
+          <button id="profile-tab-account" class="profile-tab" type="button" role="tab"
+            aria-controls="profile-account-data" aria-selected="true" tabindex="0"
+            data-profile-tab="account">Datos de Cuenta</button>
+          <button id="profile-tab-payment" class="profile-tab" type="button" role="tab"
+            aria-controls="profile-payment" aria-selected="false" tabindex="-1"
+            data-profile-tab="payment">Forma de Pago</button>
+          <button id="profile-tab-address" class="profile-tab" type="button" role="tab"
+            aria-controls="profile-address" aria-selected="false" tabindex="-1"
+            data-profile-tab="address">Dirección</button>
+        </div>
+        <section id="profile-account-data" class="profile-card" role="tabpanel"
+          aria-labelledby="profile-tab-account" tabindex="0"
+          data-profile-tab-panel="account">
           <header class="profile-page-heading">
             <div class="profile-page-title">
               <span class="eyebrow">Mi Perfil</span>
@@ -397,17 +522,146 @@
           <p class="profile-data-status" data-profile-data-status role="status"
             aria-live="polite"></p>
         </section>
-        <section id="profile-payment" class="profile-card"
-          aria-labelledby="profile-payment-title">
+        <section id="profile-payment" class="profile-card" role="tabpanel"
+          aria-labelledby="profile-tab-payment" tabindex="0"
+          data-profile-tab-panel="payment" hidden>
           <h2 id="profile-payment-title">Forma de Pago</h2>
-          <p class="profile-payment-placeholder">La gestión de tarjetas aún no está habilitada.
-            Las compras se completan directamente en la tienda de cada prenda.</p>
-          <button class="matices-button" type="button" disabled>
-            Agregar tarjeta (próximamente)</button>
+          <button class="matices-button matices-button-primary" type="button"
+            data-payment-add>Añadir nueva tarjeta</button>
+          <p class="profile-payment-empty" data-payment-empty hidden>
+            Aún no has añadido tarjetas.</p>
+          <ul class="profile-payment-list" data-payment-method-list
+            aria-label="Tarjetas guardadas para demostración"></ul>
+          <p class="profile-payment-status" data-payment-status role="status"
+            aria-live="polite"></p>
+        </section>
+        <section id="profile-address" class="profile-card" role="tabpanel"
+          aria-labelledby="profile-tab-address" tabindex="0"
+          data-profile-tab-panel="address" hidden>
+          <h2 id="profile-address-title">Direcciones de envío</h2>
+          <p class="profile-address-notice">
+            Las direcciones se guardan de forma privada en tu cuenta y puedes elegirlas
+            en el checkout.
+          </p>
+          <form class="profile-address-form" data-profile-address-form>
+            <input type="hidden" data-profile-address-id>
+            <div class="profile-form-grid">
+              <label for="profile-address-name">Nombre de la dirección
+                <input id="profile-address-name" type="text" maxlength="80"
+                  placeholder="Casa, trabajo..." required>
+              </label>
+              <label for="profile-address-street">Calle
+                <input id="profile-address-street" type="text" maxlength="120" required>
+              </label>
+              <label for="profile-address-street-number">Número
+                <input id="profile-address-street-number" type="text"
+                  inputmode="numeric" maxlength="20" required>
+              </label>
+              <label for="profile-address-dwelling-type">Tipo de vivienda
+                <select id="profile-address-dwelling-type" required>
+                  <option value="">Selecciona una opción</option>
+                  <option value="casa">Casa</option>
+                  <option value="departamento">Departamento</option>
+                  <option value="condominio">Condominio</option>
+                  <option value="oficina">Oficina</option>
+                  <option value="otro">Otro</option>
+                </select>
+              </label>
+              <label for="profile-address-dwelling-number">Número de vivienda
+                <input id="profile-address-dwelling-number" type="text"
+                  maxlength="30" required>
+              </label>
+              <label for="profile-address-commune">Comuna
+                <input id="profile-address-commune" type="text" maxlength="80" required>
+              </label>
+              <label for="profile-address-region">Región
+                <input id="profile-address-region" type="text" maxlength="80" required>
+              </label>
+              <label for="profile-address-postal-code">Código postal (ZIP)
+                <input id="profile-address-postal-code" type="text"
+                  inputmode="numeric" maxlength="12" required>
+              </label>
+            </div>
+            <div class="profile-address-actions">
+              <button class="matices-button" type="button"
+                data-profile-address-cancel hidden>Cancelar edición</button>
+              <button class="matices-button matices-button-primary" type="submit"
+                data-profile-address-save disabled>Guardar dirección</button>
+            </div>
+          </form>
+          <p class="profile-address-empty" data-profile-address-empty hidden>
+            Aún no has guardado direcciones.</p>
+          <ul class="profile-address-list" data-profile-address-list
+            aria-label="Direcciones de envío guardadas"></ul>
+          <p class="profile-address-status" data-profile-address-status role="status"
+            aria-live="polite"></p>
         </section>
       </div>
     </section>
   </div></main>
-  <script src="/app.js?v=paris-out-of-stock-1" defer></script>
+  <dialog class="profile-payment-dialog" data-payment-dialog
+    aria-labelledby="profile-payment-form-title">
+    <p class="profile-payment-notice">
+      Demo local, sin cargos. Usa solo datos de prueba: el número, vencimiento y CVV
+      no se envían ni se guardan. Al cerrar el formulario se descartan; solo se
+      conserva la marca, los últimos cuatro dígitos y el nombre en este navegador.
+    </p>
+    <form class="profile-payment-form" data-payment-form autocomplete="off">
+      <h3 id="profile-payment-form-title">Añadir nueva tarjeta</h3>
+      <div class="profile-payment-entry">
+        <div class="profile-payment-card-preview" aria-label="Vista previa de la tarjeta">
+          <div class="profile-payment-card-preview-top">
+            <span class="profile-payment-card-chip" aria-hidden="true"></span>
+            <strong data-payment-preview-brand>Tarjeta</strong>
+          </div>
+          <strong class="profile-payment-preview-number" data-payment-preview-number>
+            **** **** **** ****</strong>
+          <div class="profile-payment-preview-footer">
+            <span class="profile-payment-preview-holder" data-payment-preview-holder>
+              NOMBRE EN LA TARJETA</span>
+            <span class="profile-payment-preview-expiration">
+              <span>Vencimiento</span>
+              <strong data-payment-preview-expiration>MM/AA</strong>
+            </span>
+          </div>
+        </div>
+        <div class="profile-payment-fields">
+          <label for="payment-card-number">Número
+            <input id="payment-card-number" type="text" inputmode="numeric"
+              pattern="[0-9]{{4}} [0-9]{{4}} [0-9]{{4}} [0-9]{{4}}"
+              maxlength="19" autocomplete="off"
+              placeholder="0000 0000 0000 0000" required>
+          </label>
+          <p class="profile-payment-detected">Tipo detectado:
+            <strong data-payment-detected-brand aria-live="polite">
+              Se detecta al ingresar el número</strong>
+          </p>
+          <div class="profile-payment-fields-row">
+            <label for="payment-card-expiration">Vencimiento
+              <input id="payment-card-expiration" type="text" inputmode="numeric"
+                pattern="(0[1-9]|1[0-2])/[0-9]{{2}}" maxlength="5"
+                autocomplete="off" placeholder="MM/AA" required>
+            </label>
+            <label for="payment-card-cvv">Código de Seguridad
+              <input id="payment-card-cvv" type="text" inputmode="numeric"
+                pattern="[0-9]{{3}}" maxlength="3" autocomplete="off"
+                placeholder="CVV" required>
+            </label>
+          </div>
+          <label for="payment-cardholder-name">Nombre en la tarjeta
+            <input id="payment-cardholder-name" type="text" maxlength="80"
+              autocomplete="off" placeholder="Nombre como aparece en la tarjeta"
+              required>
+          </label>
+        </div>
+      </div>
+      <div class="profile-payment-actions">
+        <button class="matices-button" type="button" data-payment-cancel>Cancelar</button>
+        <button class="matices-button matices-button-primary" type="submit">
+          Guardar tarjeta</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/app.js?v=clothing-try-on-provider-1" defer></script>
 </body>
 </html>

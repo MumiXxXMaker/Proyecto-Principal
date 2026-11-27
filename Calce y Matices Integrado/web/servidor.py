@@ -88,6 +88,12 @@ RAPIDAPI_DIFFUSION_KEY = (
 RAPIDAPI_REFINER_KEY = (
     os.environ.get("RAPIDAPI_REFINER_KEY", "").strip() or RAPIDAPI_KEY
 )
+RAPIDAPI_VTON4_KEY = (
+    os.environ.get("RAPIDAPI_VTON4_KEY", "").strip() or RAPIDAPI_KEY
+)
+RAPIDAPI_CLOTHING_TRYON_KEY = (
+    os.environ.get("RAPIDAPI_CLOTHING_TRYON_KEY", "").strip() or RAPIDAPI_KEY
+)
 RAPIDAPI_HOST = "try-on-clothes-pro.p.rapidapi.com"
 RAPIDAPI_ENDPOINT = (
     f"https://{RAPIDAPI_HOST}/portrait/editing/try-on-clothes-pro"
@@ -111,6 +117,14 @@ REFINER_RAPIDAPI_ENDPOINT = (
 REFINER_RAPIDAPI_TASK_RESULT_ENDPOINT = (
     f"https://{REFINER_RAPIDAPI_HOST}/api/rapidapi/query-async-task-result"
 )
+VTON4_RAPIDAPI_HOST = "virtual-try-on4.p.rapidapi.com"
+VTON4_RAPIDAPI_ENDPOINT = f"https://{VTON4_RAPIDAPI_HOST}/tryon"
+CLOTHING_TRYON_RAPIDAPI_HOST = (
+    "clothing-try-on-api-see-how-clothes-look-on-a-person.p.rapidapi.com"
+)
+CLOTHING_TRYON_RAPIDAPI_ENDPOINT = (
+    f"https://{CLOTHING_TRYON_RAPIDAPI_HOST}/v1/try-on/clothes"
+)
 MAX_VTON_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_VTON_REQUEST_BYTES = 8 * 1024 * 1024
 MAX_CATALOG_IMAGE_BYTES = 20 * 1024 * 1024
@@ -123,9 +137,17 @@ RAPIDAPI_TASK_TIMEOUT_SECONDS = 540
 
 
 class TryOnProvidersError(Exception):
-    def __init__(self, primary_error: Exception, fallback_error: Exception):
+    def __init__(
+        self,
+        primary_error: Exception,
+        fallback_error: Exception,
+        primary_name: str = "Try on Clothes Pro",
+        fallback_name: str = "DataToBiz",
+    ):
         self.primary_error = primary_error
         self.fallback_error = fallback_error
+        self.primary_name = primary_name
+        self.fallback_name = fallback_name
         super().__init__("Fallaron la API principal y la alternativa.")
 
 
@@ -200,6 +222,13 @@ CATALOG_STORES_BY_URL = {
     **{url: "Vestua" for url in VESTUA_IMAGES_BY_URL},
     **WOMENSWEAR_STORES_BY_URL,
 }
+STOREFRONT_IMAGE_OVERRIDES = {
+    "https://www.paris.cl/vestido-kathy-mesh-147860.html": (
+        "https://cl-cenco-pim-resizer.ecomm.cencosud.com/unsafe/adaptive-fit-in/"
+        "792x1068/prd-cl/product-medias/9173ec32-7a10-4c4d-92c8-a74376f84fad/"
+        "MKV9BF9277/MKV9BF9277-1/1757196623064-MKV9BF9277-1-1.jpg"
+    ),
+}
 
 
 def _is_footwear(product: ProductoVestua) -> bool:
@@ -217,6 +246,36 @@ def _is_footwear(product: ProductoVestua) -> bool:
             normalized_details,
         )
     )
+
+
+def _is_mens_or_childrenswear(product: ProductoVestua) -> bool:
+    details = " ".join(
+        (product.titulo, product.tipo_prenda, product.categorias_catalogo)
+    )
+    # “Baby tee” es el nombre de un corte de polera de mujer, no una prenda para bebé.
+    details = re.sub(r"\bbaby[ -]+tee\b", " ", details, flags=re.IGNORECASE)
+    normalized_details = _normalize_search_text(details)
+    explicitly_menswear = re.search(
+        r"\b(?:hombres?|masculin[oa]s?|men|mens|male|caballeros?)\b",
+        normalized_details,
+    )
+    explicitly_childrenswear = re.search(
+        r"\b(?:niñ[oa]s?|ninos?|infantil(?:es)?|kids|juniors?|baby|babies|"
+        r"bebes?|toddlers?|children|child|boys|girls)\b",
+        details,
+        re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:niños?|ninos?|infantil(?:es)?|kids|juniors?|baby|babies|"
+        r"bebes?|toddlers?|children|child|boys|girls)\b",
+        normalized_details,
+    ) or re.search(
+        r"\b(?:para|de|hasta)\s+ninas?\b|\bninas?\s+hasta\s+\d+\s+anos?\b",
+        normalized_details,
+    ) or re.search(
+        r"\bboy\b(?!\s+short\s+bikini\b)",
+        normalized_details,
+    )
+    return bool(explicitly_menswear or explicitly_childrenswear)
 
 
 def _normalize_search_text(value: str) -> str:
@@ -273,6 +332,7 @@ CATALOG_PRODUCTS = tuple(
     product
     for product in (*VESTUA_PRODUCTS, *WOMENSWEAR_PRODUCTS)
     if not _is_footwear(product)
+    and not _is_mens_or_childrenswear(product)
     and (
         (image_url := CATALOG_IMAGES_BY_URL.get(product.url))
         and urlparse(image_url).scheme == "https"
@@ -611,6 +671,7 @@ def _catalog_product_card(
     indice: int,
     preferencia: str,
     perfil: PerfilMedidas,
+    show_fit_summary: bool = False,
 ) -> str:
     store = CATALOG_STORES_BY_URL.get(product.url, "Vestua")
     available_sizes = CATALOG_SIZES_BY_URL.get(product.url, ())
@@ -651,6 +712,28 @@ def _catalog_product_card(
         if result and result.diagnostico.clase_css
         else "partial"
     )
+    fit_summary = ""
+    if show_fit_summary and result:
+        comparisons = [
+            f"{measure.nombre}: tú {_format_measure(measure.cuerpo)}, "
+            f"prenda {_format_measure(measure.prenda)} "
+            f"(holgura {_format_difference(measure.holgura)})"
+            for measure in result.medidas
+            if measure.cuerpo is not None
+        ]
+        missing_measures = [
+            measure.nombre.lower()
+            for measure in result.medidas
+            if measure.cuerpo is None
+        ]
+        summary_text = (
+            "Comparación referencial con tus medidas: " + " · ".join(comparisons)
+            if comparisons
+            else "Ingresa tus medidas para estimar cómo podría quedarte esta prenda."
+        )
+        if missing_measures:
+            summary_text += f" · Falta ingresar {', '.join(missing_measures)}."
+        fit_summary = f'<p class="catalog-fit-description recommendation-fit-summary">{escape(summary_text)}</p>'
     def render_size_option(size: str) -> str:
         out_of_stock = size.casefold() in out_of_stock_sizes
         attributes = ' disabled class="catalog-size-unavailable"' if out_of_stock else ""
@@ -732,6 +815,7 @@ def _catalog_product_card(
       <div class="catalog-item-info">
         <span class="catalog-brand">{escape(store)} · {escape(product.marca)} · {escape(product.tipo_prenda)}</span>
         <h3>{escape(product.titulo)}</h3>
+        {fit_summary}
         {published_size_markup}
         <strong class="catalog-price">{_format_price(product.precio_clp)}</strong>
         {purchase_controls}
@@ -749,6 +833,74 @@ def _catalog_product_card(
           target="_blank" rel="noopener noreferrer">Ver ficha en {escape(store)}</a>
       </div>
     </article>"""
+
+
+def _catalog_measurement_prompt(
+    perfil: PerfilMedidas,
+    preferencia: str,
+    query: Dict[str, str],
+) -> str:
+    missing = [
+        measure
+        for measure, value in (
+            ("cintura", perfil.cintura),
+            ("cadera", perfil.cadera),
+        )
+        if value is None
+    ]
+    if not missing:
+        return ""
+
+    if len(missing) == 2:
+        message = (
+            "Para estimar cómo te queda cada prenda, necesitamos tus medidas "
+            "de cintura y cadera."
+        )
+    else:
+        message = (
+            "Para estimar cómo te queda cada prenda, completa también la "
+            f"medida de {missing[0]}."
+        )
+
+    field_config = {
+        key: (label, minimum, maximum, step, placeholder)
+        for key, label, minimum, maximum, step, placeholder in MEASUREMENT_FIELDS
+    }
+    measurement_inputs = []
+    for measure in ("waist", "hip"):
+        label, minimum, maximum, step, placeholder = field_config[measure]
+        measurement_inputs.append(
+            '<label class="catalog-measurement-field" '
+            f'for="catalog-measurement-{measure}">'
+            f'<span>{escape(label)} (cm)</span>'
+            f'<input id="catalog-measurement-{measure}" name="{measure}" '
+            f'type="number" min="{minimum}" max="{maximum}" step="{step}" '
+            f'placeholder="{escape(placeholder, quote=True)}" '
+            f'value="{escape(query.get(measure, ""), quote=True)}" required>'
+            '</label>'
+        )
+    preserved_filters = "".join(
+        f'<input type="hidden" name="{name}" '
+        f'value="{escape(query[name], quote=True)}">'
+        for name in ("search", "sort", "type", "size", "brand", "min_price", "max_price")
+        if query.get(name)
+    )
+    return (
+        '<aside class="catalog-measurement-prompt" '
+        'aria-label="Datos para estimar el calce">'
+        f"<p>{message}</p>"
+        '<form class="catalog-measurement-form" action="/" method="get" '
+        'data-catalog-measurement-form aria-label="Ingresa cintura y cadera">'
+        '<input type="hidden" name="view" value="catalog">'
+        f'<input type="hidden" name="preference" '
+        f'value="{escape(preferencia, quote=True)}">'
+        f'{preserved_filters}'
+        '<div class="catalog-measurement-fields">'
+        f'{"".join(measurement_inputs)}</div>'
+        '<button type="submit">Ver cómo quedan</button>'
+        '</form>'
+        "</aside>"
+    )
 
 
 def _garment_catalog(
@@ -803,7 +955,8 @@ def _garment_catalog(
         '<p class="catalog-result-count" data-catalog-result-count '
         f'aria-live="polite">{escape(catalog_data["result_text"])}</p>'
         '<p class="catalog-favorite-status" data-catalog-favorite-status '
-        'role="status" aria-live="polite"></p></div>'
+        'role="status" aria-live="polite"></p></div></div>'
+        '<div class="catalog-sticky-header" data-catalog-sticky-header>'
         '<div class="catalog-toolbar-actions">'
         '<button class="catalog-filter-trigger" type="button" '
         'data-catalog-open-filters aria-haspopup="dialog" '
@@ -813,7 +966,8 @@ def _garment_catalog(
         'data-catalog-filter-count>0</span></button>'
         '<label class="catalog-sort-label" for="catalog-sort"><span>Ordenar por</span>'
         '<select id="catalog-sort" data-catalog-sort>'
-        f'{sort_options}</select></label></div></div>'
+        f'{sort_options}</select></label></div>'
+        '</div>'
         '<div class="catalog-view-bar"><span class="catalog-view-count">'
         f'{catalog_data["total"]} prendas</span>'
         '<div class="catalog-view-controls" role="group" aria-label="Vista de productos">'
@@ -854,9 +1008,9 @@ def _garment_catalog(
         f'{brand_options}</select></label></details>'
         '<details class="catalog-filter-section"><summary>Precio</summary>'
         '<fieldset class="catalog-price-range"><legend>Rango en CLP</legend>'
-        '<label>Desde<input type="number" min="0" step="1000" '
+        '<label>Desde<input type="number" min="0" step="1" '
         f'data-catalog-min-price value="{escape(query.get("min_price", ""), quote=True)}"></label>'
-        '<label>Hasta<input type="number" min="0" step="1000" '
+        '<label>Hasta<input type="number" min="0" step="1" '
         f'data-catalog-max-price value="{escape(query.get("max_price", ""), quote=True)}"></label>'
         '</fieldset></details></div></div></aside>'
         '<footer class="catalog-filter-dialog-footer"><button type="button" '
@@ -864,6 +1018,7 @@ def _garment_catalog(
         f'data-catalog-total="{catalog_data["total"]}">'
         f'Mostrar {catalog_data["total"]} productos</button></footer>'
         '</div></dialog>'
+        f'{_catalog_measurement_prompt(perfil, preferencia, query)}'
         f'<div class="catalog-grid" data-catalog-items '
         f'data-catalog-page-size="{CATALOG_PAGE_SIZE}" data-view="5">'
         f'{catalog_data["cards"]}</div>'
@@ -913,7 +1068,7 @@ def _garment_catalog(
     )
 
 
-def _virtual_try_on_panel() -> str:
+def _virtual_try_on_panel(recommendations: str = "") -> str:
     return (
         '<section class="try-on-panel" data-virtual-try-on '
         'aria-labelledby="virtual-try-on-title">'
@@ -928,12 +1083,31 @@ def _virtual_try_on_panel() -> str:
         '<p data-vton-person-empty>No hay una foto seleccionada en esta sesión. '
         '<a href="/" data-vton-return-home>Ve a Inicio y selecciona una foto.</a></p>'
         '</div>'
-        '<div class="try-on-output" data-vton-output aria-live="polite">'
+        '<section class="try-on-output" data-vton-output '
+        'aria-labelledby="try-on-result-title" aria-live="polite">'
+        '<h2 class="try-on-output-title" id="try-on-result-title">'
+        'Resultado Probador</h2>'
+        '<div class="try-on-output-frame" data-vton-result-frame '
+        'aria-label="Resultado Probador">'
+        '<div class="try-on-result-placeholder" aria-hidden="true"></div>'
         '<figure class="try-on-result" data-vton-result hidden>'
         '<figcaption data-vton-result-status></figcaption>'
         '<img data-vton-result-image alt="Resultado de la prueba virtual">'
         '</figure>'
-        '</div></div>'
+        '</div>'
+        '</section></div>'
+        '<section class="try-on-recommendations" aria-labelledby="try-on-recommendations-title">'
+        '<h2 class="try-on-recommendations-title" id="try-on-recommendations-title">'
+        'Recomendaciones</h2>'
+        '<div class="cart-recommendations-carousel try-on-recommendations-carousel" '
+        'data-try-on-recommendations>'
+        '<button class="cart-recommendations-arrow" type="button" '
+        'data-try-on-recommendations-previous aria-label="Ver conjunto anterior">‹</button>'
+        '<div class="cart-recommendations-outfits" data-try-on-recommendations-outfits '
+        'aria-live="polite">' + recommendations + '</div>'
+        '<button class="cart-recommendations-arrow" type="button" '
+        'data-try-on-recommendations-next aria-label="Ver conjunto siguiente">›</button>'
+        '</div></section>'
         '<div class="try-on-controls">'
         '<span class="try-on-product-label" id="vton-product-list-label">'
         'Prendas</span>'
@@ -972,6 +1146,8 @@ def _virtual_try_on_panel() -> str:
         '<option value="datatobiz">DataToBiz</option>'
         '<option value="diffusion">Try-On Diffusion</option>'
         '<option value="refiner">Try on Clothes Refiner</option>'
+        '<option value="vton4">Virtual Try On 4</option>'
+        '<option value="clothing_tryon">Clothing Try-On API</option>'
         '</select>'
         '</label>'
         '<p class="try-on-provider-hint" id="vton-provider-help">'
@@ -1728,6 +1904,92 @@ def _try_on_diffusion(
     return {source_key: image_source}
 
 
+def _try_on_vton4(
+    person_image: bytes,
+    product: ProductoVestua,
+) -> Dict[str, str]:
+    product_image_url = CATALOG_IMAGES_BY_URL.get(product.url)
+    if not product_image_url:
+        raise ValueError("La prenda seleccionada no tiene una imagen disponible.")
+    garment_image = _prepare_rapidapi_image(
+        _download_catalog_image(product_image_url),
+        "La prenda seleccionada",
+    )
+    body, boundary = _multipart_form(
+        {},
+        {
+            "personImage": ("person.jpg", person_image, "image/jpeg"),
+            "clothImage": ("cloth.jpg", garment_image, "image/jpeg"),
+        },
+    )
+    request = Request(
+        VTON4_RAPIDAPI_ENDPOINT,
+        data=body,
+        headers={
+            "x-rapidapi-key": RAPIDAPI_VTON4_KEY,
+            "x-rapidapi-host": VTON4_RAPIDAPI_HOST,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json, image/*",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=180) as response:
+        source_key, image_source = _try_on_diffusion_response_source(response)
+    return {source_key: image_source}
+
+
+def _try_on_clothing_api(
+    person_image: bytes,
+    product: ProductoVestua,
+) -> Dict[str, str]:
+    product_image_url = CATALOG_IMAGES_BY_URL.get(product.url)
+    if not product_image_url:
+        raise ValueError("La prenda seleccionada no tiene una imagen disponible.")
+    garment_image = _prepare_rapidapi_image(
+        _download_catalog_image(product_image_url),
+        "La prenda seleccionada",
+    )
+    category = _virtual_try_on_category(product)
+    garment_type = {
+        "upper_body": "upper",
+        "lower_body": "lower",
+        "dresses": "full",
+    }.get(category)
+    if not garment_type:
+        raise ValueError("La categoría de prenda no es compatible con Clothing Try-On API.")
+    body, boundary = _multipart_form(
+        {"garment_type": garment_type},
+        {
+            "person_image": ("person.jpg", person_image, "image/jpeg"),
+            "garment_image": ("garment.jpg", garment_image, "image/jpeg"),
+        },
+    )
+    request = Request(
+        CLOTHING_TRYON_RAPIDAPI_ENDPOINT,
+        data=body,
+        headers={
+            "x-rapidapi-key": RAPIDAPI_CLOTHING_TRYON_KEY,
+            "x-rapidapi-host": CLOTHING_TRYON_RAPIDAPI_HOST,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "image/jpeg, image/png",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=180) as response:
+        response_body = response.read(MAX_DATATOBIZ_RESPONSE_BYTES + 1)
+        if len(response_body) > MAX_DATATOBIZ_RESPONSE_BYTES:
+            raise ValueError("Clothing Try-On API devolvió una imagen demasiado grande.")
+        mime_type = _image_mime_type(response_body)
+        if mime_type not in ("image/jpeg", "image/png"):
+            raise ValueError("Clothing Try-On API no devolvió una imagen JPEG o PNG válida.")
+        return {
+            "result_image_data_url": (
+                f"data:{mime_type};base64,"
+                f"{base64.b64encode(response_body).decode('ascii')}"
+            )
+        }
+
+
 def _try_on_clothes_refiner(
     person_image: bytes,
     coarse_image_url: str,
@@ -1796,6 +2058,37 @@ def _supports_datatobiz_fallback(
         len(products) == 1
         and _virtual_try_on_category(products[0]) == "upper_body"
     )
+
+
+def _datatobiz_try_on_with_fallback(
+    person_image: bytes,
+    product: ProductoVestua,
+) -> Dict[str, str]:
+    try:
+        return _datatobiz_try_on(person_image, product)
+    except (HTTPError, URLError, TimeoutError, OSError, IncompleteRead) as primary_error:
+        if isinstance(primary_error, HTTPError) and primary_error.code < 500:
+            raise
+        if not RAPIDAPI_KEY:
+            raise
+        try:
+            result = _rapidapi_try_on(person_image, (product,))
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            OSError,
+            IncompleteRead,
+            ValueError,
+        ) as fallback_error:
+            raise TryOnProvidersError(
+                primary_error,
+                fallback_error,
+                primary_name="DataToBiz",
+                fallback_name="Try on Clothes Pro",
+            ) from fallback_error
+        result["detail"] = "Resultado Probador (respaldo Try on Clothes Pro)"
+        return result
 
 
 def _try_on_with_fallback(
@@ -2300,7 +2593,141 @@ def _alternative_recommendations(
     )
 
 
-def _storefront_content() -> str:
+def _outfit_recommendations(
+    profile: PerfilMedidas,
+    preference: str,
+    limit: int = 3,
+    show_outfit_labels: bool = True,
+    show_fit_details: bool = False,
+) -> str:
+    color_terms = {
+        "negro": "oscuro", "negra": "oscuro", "negros": "oscuro",
+        "negro": "oscuro", "blanco": "claro", "blanca": "claro",
+        "marfil": "claro", "crudo": "claro", "beige": "neutro",
+        "arena": "neutro", "camel": "neutro", "cafe": "neutro",
+        "marron": "neutro", "chocolate": "neutro", "gris": "neutro",
+        "azul": "azul", "celeste": "azul", "marino": "azul",
+        "denim": "azul", "rojo": "rojo", "burdeo": "rojo",
+        "vino": "rojo", "rosado": "rosa", "rosa": "rosa",
+        "verde": "verde", "oliva": "verde", "amarillo": "amarillo",
+        "ocre": "amarillo", "naranjo": "naranja", "lila": "violeta",
+        "morado": "violeta",
+    }
+
+    def product_color(product: ProductoVestua) -> str:
+        title = _normalize_search_text(product.titulo)
+        return next((family for term, family in color_terms.items()
+                     if re.search(rf"\b{re.escape(_normalize_search_text(term))}\b", title)), "")
+
+    ranked = {}
+    for product in CATALOG_PRODUCTS:
+        reference, _ = _reference_for_listing(product)
+        if reference is None:
+            continue
+        result = _calculate_fit(reference, profile, preference)
+        # Se ordenan por mejor calce, sin descartar el resto: las 3 propuestas
+        # deben seguir disponibles y mostrar su diagnóstico con transparencia.
+        product_type = _normalize_search_text(product.tipo_prenda)
+        if product_type in VTON_UPPER_BODY_TYPES:
+            ranked.setdefault("upper", []).append((product, result, product_color(product)))
+        elif product_type in VTON_LOWER_BODY_TYPES:
+            ranked.setdefault("lower", []).append((product, result, product_color(product)))
+    for products in ranked.values():
+        products.sort(key=lambda item: (
+            not isfinite(item[1].puntuacion),
+            item[1].puntuacion if isfinite(item[1].puntuacion) else 0,
+            item[0].precio_clp is None,
+            item[0].precio_clp or 0,
+            item[0].id,
+        ))
+
+    upper_products = tuple(
+        item for item in ranked.get("upper", ())
+        if _normalize_search_text(item[0].tipo_prenda) not in {"enterito", "vestido", "buzo"}
+    )[:100]
+    lower_products = ranked.get("lower", ())[:100]
+    pair_candidates = []
+    for upper in upper_products:
+        for lower in lower_products:
+            upper_color, lower_color = upper[2], lower[2]
+            if upper_color and lower_color:
+                harmonious = (upper_color == lower_color or "neutro" in
+                              (upper_color, lower_color) or "oscuro" in
+                              (upper_color, lower_color) or "claro" in
+                              (upper_color, lower_color))
+                color_penalty = 0 if harmonious else 0.5
+                color_note = ("Tonos combinables: " if harmonious else "Contraste de color: ") + f"{upper_color} + {lower_color}"
+            else:
+                color_penalty = 0.2
+                color_note = ""
+            pair_candidates.append((
+                upper[1].puntuacion + lower[1].puntuacion + color_penalty,
+                upper, lower, color_note,
+            ))
+    pair_candidates.sort(key=lambda item: (item[0], item[1][0].id, item[2][0].id))
+
+    outfits = []
+    used_products = set()
+
+    def render_outfit_product(
+        product: ProductoVestua, result: ResultadoCalce, index: int
+    ) -> str:
+        reference, reference_label = _reference_for_listing(product)
+        return _catalog_product_card(
+            product,
+            reference,
+            result,
+            reference_label or "",
+            index,
+            preference,
+            profile,
+            show_fit_summary=show_fit_details,
+        )
+
+    for _, upper, lower, color_note in pair_candidates:
+        product_ids = {upper[0].id, lower[0].id}
+        if product_ids & used_products:
+            continue
+        used_products.update(product_ids)
+        title = f"{upper[0].tipo_prenda} + {lower[0].tipo_prenda}"
+        pieces = "".join(
+            render_outfit_product(product, result, len(outfits) * 2 + index)
+            for index, (product, result, _) in enumerate((upper, lower))
+        )
+        outfit_labels = (
+            f'<h3>{escape(title)}</h3>'
+            + (f'<p class="cart-outfit-color">{escape(color_note)}</p>' if color_note else "")
+            if show_outfit_labels else ""
+        )
+        outfits.append(
+            f'<article class="storefront-outfit" aria-label="Conjunto: {escape(title, quote=True)}">'
+            f'{outfit_labels}'
+            f'<div class="storefront-outfit-pieces">{pieces}</div></article>'
+        )
+        if len(outfits) == limit:
+            break
+    return "".join(outfits)
+
+
+def _storefront_content(
+    profile: Optional[PerfilMedidas] = None, preference: str = "regular"
+) -> str:
+    profile = profile or PerfilMedidas()
+    def image_url(product: ProductoVestua) -> str:
+        return STOREFRONT_IMAGE_OVERRIDES.get(
+            product.url, CATALOG_IMAGES_BY_URL[product.url]
+        )
+
+    def image_alt(product: ProductoVestua) -> str:
+        if product.url in STOREFRONT_IMAGE_OVERRIDES:
+            return f"Imagen referencial de vestido blanco para {product.titulo}."
+        return product.titulo
+
+    def image_note(product: ProductoVestua) -> str:
+        if product.url in STOREFRONT_IMAGE_OVERRIDES:
+            return '<span class="image-source">Imagen referencial · vestido blanco</span>'
+        return ""
+
     category_specs = (
         ("Blusas", "Blusa"),
         ("Jeans", "Jeans"),
@@ -2320,7 +2747,7 @@ def _storefront_content() -> str:
         f"""<a class="storefront-category" href="/?{urlencode({
             "view": "catalog", "type": product_type
         })}" aria-label="Explorar {escape(label, quote=True)}">
-          <img src="{escape(CATALOG_IMAGES_BY_URL[product.url], quote=True)}"
+          <img src="{escape(image_url(product), quote=True)}"
             alt="" loading="lazy" referrerpolicy="no-referrer">
           <span class="storefront-category-copy">
             <span class="eyebrow">Descubre</span><strong>{escape(label)}</strong>
@@ -2334,9 +2761,10 @@ def _storefront_content() -> str:
         f"""<article class="storefront-product">
           <a class="storefront-product-image" href="{escape(product.url, quote=True)}"
             target="_blank" rel="noopener noreferrer">
-            <img src="{escape(CATALOG_IMAGES_BY_URL[product.url], quote=True)}"
-              alt="{escape(product.titulo, quote=True)}" loading="lazy"
+            <img src="{escape(image_url(product), quote=True)}"
+              alt="{escape(image_alt(product), quote=True)}" loading="lazy"
               referrerpolicy="no-referrer">
+            {image_note(product)}
           </a>
           <div class="storefront-product-info">
             <span>{escape(CATALOG_STORES_BY_URL.get(product.url, "Vestua"))}
@@ -2349,14 +2777,13 @@ def _storefront_content() -> str:
         for product_type in featured_types
         if (product := products_by_type.get(product_type)) is not None
     )
+    outfit_recommendations = _outfit_recommendations(profile, preference)
     hero_product = products_by_type.get("Vestido")
     hero_image = (
-        f"""<a class="storefront-hero-visual"
-          href="{escape(hero_product.url, quote=True)}" target="_blank"
-          rel="noopener noreferrer" aria-label="Ver {escape(hero_product.titulo, quote=True)}">
-          <img src="{escape(CATALOG_IMAGES_BY_URL[hero_product.url], quote=True)}"
+        f"""<div class="storefront-hero-visual">
+          <img src="{escape(image_url(hero_product), quote=True)}"
             alt="" fetchpriority="high" referrerpolicy="no-referrer">
-        </a>"""
+        </div>"""
         if hero_product
         else ""
     )
@@ -2377,12 +2804,44 @@ def _storefront_content() -> str:
           <span class="eyebrow">Calce · estilo personal</span>
           <h1 id="storefront-title">Tu estilo, tu calce, tu manera de elegir.</h1>
           <p>Explora prendas, descubre nuevos favoritos y encuentra referencias que te ayuden a elegir con más confianza.</p>
-          <div class="storefront-hero-actions">
-            <a class="matices-button matices-button-primary" href="/?view=catalog">Explorar prendas</a>
-            <a class="matices-button" href="/?view=home">Tu Calce</a>
-          </div>
+        </div>
+        <div class="storefront-hero-actions">
+          <a class="matices-button matices-button-primary" href="/?view=catalog">Explorar prendas</a>
         </div>
         {hero_image}
+      </section>
+      <section class="storefront-how-to" aria-labelledby="storefront-how-to-title">
+        <h2 id="storefront-how-to-title">¿Qué es “Tu Calce” y cómo se usa?</h2>
+        <p class="storefront-how-to-intro">
+          Tu Calce es una guía personal: usa una foto para orientar tu paleta de color
+          y tus medidas corporales para estimar tallas y cómo podrían quedarte las prendas.
+          Sus recomendaciones son referenciales.
+        </p>
+        <ol class="storefront-how-to-steps">
+          <li><span class="storefront-how-to-number" aria-hidden="true">01</span>
+            <div><h3>Abre Tu Calce</h3>
+              <p>Entra desde el menú principal e inicia sesión si te lo solicita.</p></div>
+          </li>
+          <li><span class="storefront-how-to-number" aria-hidden="true">02</span>
+            <div><h3>Sube o toma una foto</h3>
+              <p>Elige una imagen con buena luz para recibir una orientación de color.</p></div>
+          </li>
+          <li><span class="storefront-how-to-number" aria-hidden="true">03</span>
+            <div><h3>Registra tus medidas</h3>
+              <p>Anota tus medidas en centímetros; cintura y cadera ayudan a estimar el calce.</p></div>
+          </li>
+          <li><span class="storefront-how-to-number" aria-hidden="true">04</span>
+            <div><h3>Revisa tu resumen</h3>
+              <p>Consulta tu paleta sugerida y las tallas estimadas según las medidas ingresadas.</p></div>
+          </li>
+          <li><span class="storefront-how-to-number" aria-hidden="true">05</span>
+            <div><h3>Explora y prueba</h3>
+              <p>Compara prendas en el Catálogo y selecciona las que quieras probar.</p></div>
+          </li>
+        </ol>
+        <div class="storefront-how-to-action">
+          <a class="matices-button matices-button-primary" href="/?view=home">Tu Calce</a>
+        </div>
       </section>
       <section class="storefront-promise" aria-labelledby="storefront-promise-title">
         <h2 id="storefront-promise-title">Una experiencia para elegir a tu manera</h2>
@@ -2403,6 +2862,20 @@ def _storefront_content() -> str:
           <a href="/?view=catalog">Descubrir más <span aria-hidden="true">→</span></a>
         </div>
         <div class="storefront-products">{featured}</div>
+      </section>
+      <section class="storefront-section storefront-outfit-section"
+        aria-labelledby="storefront-outfits-title">
+        <div class="storefront-section-heading">
+          <div><span class="eyebrow">Ideas para combinar</span>
+            <h2 id="storefront-outfits-title">Recomendaciones de conjuntos</h2></div>
+          <a href="/?view=catalog">Explorar catálogo <span aria-hidden="true">→</span></a>
+        </div>
+        <p class="storefront-outfit-note">
+          Combinaciones orientativas creadas con prendas disponibles en el catálogo.
+          Se basan en el tipo de prenda, no en colores o estilos; revisa las fotos,
+          el precio y la disponibilidad en cada tienda.
+        </p>
+        <div class="storefront-outfits">{outfit_recommendations}</div>
       </section>
       <section class="storefront-story" aria-labelledby="storefront-story-title">
         <img src="/assets/calce-isotipo.png" alt="" loading="lazy">
@@ -2521,7 +2994,7 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
     active_view = (
         requested_view
         if requested_view in {
-            "storefront", "home", "catalog", "cart", "account", "try-on",
+            "storefront", "home", "catalog", "cart", "checkout", "account", "try-on",
             "profile", "info", "favorites"
         }
         else "home" if "wizard_step" in query else "storefront"
@@ -2598,7 +3071,6 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
     garment_catalog = _garment_catalog(
         perfil, preferencia, visible=True, query=query
     )
-    virtual_try_on_panel = _virtual_try_on_panel()
     personal_recommendations = _personal_recommendations(
         perfil,
         preferencia,
@@ -2616,7 +3088,15 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         CATEGORY_GROUPS.get(grupo_categoria)
         or ((categoria,) if categoria else None),
     )
-    storefront_content = _storefront_content()
+    storefront_content = _storefront_content(perfil, preferencia)
+    cart_recommendations = _outfit_recommendations(
+        perfil,
+        preferencia,
+        limit=12,
+        show_outfit_labels=False,
+        show_fit_details=True,
+    )
+    virtual_try_on_panel = _virtual_try_on_panel(cart_recommendations)
     fit_information_content = _fit_information_content()
     results_heading = (
         '<div class="results-head">'
@@ -2700,6 +3180,7 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         store_recommendations=store_recommendations,
         garment_catalog=garment_catalog,
         storefront_content=storefront_content,
+        cart_recommendations=cart_recommendations,
         fit_information_content=fit_information_content,
         size_ranges=_size_ranges(),
         virtual_try_on_panel=virtual_try_on_panel,
@@ -2733,6 +3214,9 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
             if active_view == "account" and query.get("auth_mode") == "sign-up"
             else ""
         ),
+        nav_account_links_hidden=(
+            ' hidden' if active_view == "account" else ""
+        ),
         home_panel_hidden=(
             ' hidden' if active_view != "account" else ""
         ),
@@ -2752,6 +3236,7 @@ def renderizar_pagina(query: Dict[str, str]) -> str:
         try_on_panel_hidden=' hidden',
         profile_panel_hidden=' hidden',
         cart_panel_hidden=' hidden' if active_view != "cart" else "",
+        checkout_panel_hidden=' hidden' if active_view != "checkout" else "",
         favorites_panel_hidden=(
             ' hidden' if active_view != "favorites" else ""
         ),
@@ -2909,6 +3394,8 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
             "datatobiz",
             "diffusion",
             "refiner",
+            "vton4",
+            "clothing_tryon",
         ):
             self._send_json(
                 {"error": "Selecciona un proveedor de prueba válido."}, 400
@@ -3035,6 +3522,30 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
                 400,
             )
             return
+        if provider == "vton4" and len(selected_products) != 1:
+            self._send_json(
+                {"error": "Virtual Try On 4 admite una sola prenda por solicitud."},
+                400,
+            )
+            return
+        if provider == "clothing_tryon" and len(selected_products) != 1:
+            self._send_json(
+                {"error": "Clothing Try-On API admite una sola prenda por solicitud."},
+                400,
+            )
+            return
+        if provider == "clothing_tryon" and not RAPIDAPI_CLOTHING_TRYON_KEY:
+            self._send_json(
+                {"error": "Configura RAPIDAPI_CLOTHING_TRYON_KEY o RAPIDAPI_KEY para Clothing Try-On API."},
+                503,
+            )
+            return
+        if provider == "vton4" and not RAPIDAPI_VTON4_KEY:
+            self._send_json(
+                {"error": "Configura RAPIDAPI_VTON4_KEY o RAPIDAPI_KEY para Virtual Try On 4."},
+                503,
+            )
+            return
         if provider == "diffusion" and not RAPIDAPI_DIFFUSION_KEY:
             self._send_json(
                 {"error": "Configura una clave RapidAPI para Try-On Diffusion."},
@@ -3106,6 +3617,14 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
             fallback_limit = (
                 " Modo directo seleccionado; no se intenta otra API."
             )
+        elif provider == "vton4":
+            fallback_limit = (
+                " Modo directo seleccionado; no se intenta otra API."
+            )
+        elif provider == "clothing_tryon":
+            fallback_limit = (
+                " Modo directo seleccionado; no se intenta otra API."
+            )
         elif provider == "refiner":
             fallback_limit = (
                 " Refiner usa Try on Clothes Pro para generar la imagen "
@@ -3115,14 +3634,23 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
             fallback_limit = ""
         try:
             if provider == "datatobiz":
-                result = _datatobiz_try_on(person_image, selected_products[0])
-                result["detail"] = "Resultado Probador (DataToBiz)"
+                result = _datatobiz_try_on_with_fallback(
+                    person_image,
+                    selected_products[0],
+                )
+                result.setdefault("detail", "Resultado Probador (DataToBiz)")
             elif provider == "rapidapi":
                 result = _rapidapi_try_on(person_image, selected_products)
                 result["detail"] = "Resultado Probador (Try on Clothes Pro)"
             elif provider == "diffusion":
                 result = _try_on_diffusion(person_image, selected_products[0])
                 result["detail"] = "Resultado Probador (Try-On Diffusion)"
+            elif provider == "vton4":
+                result = _try_on_vton4(person_image, selected_products[0])
+                result["detail"] = "Resultado Probador (Virtual Try On 4)"
+            elif provider == "clothing_tryon":
+                result = _try_on_clothing_api(person_image, selected_products[0])
+                result["detail"] = "Resultado Probador (Clothing Try-On API)"
             elif provider == "refiner":
                 garment_files = _prepare_rapidapi_garment_files(
                     person_image,
@@ -3163,9 +3691,11 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {
                     "error": (
-                        "Fallaron Try on Clothes Pro y DataToBiz. "
-                        f"Principal: {describe_provider_error(error.primary_error)}. "
-                        f"Alternativa: {describe_provider_error(error.fallback_error)}."
+                        "Fallaron ambos proveedores de probador. "
+                        f"{error.primary_name}: "
+                        f"{describe_provider_error(error.primary_error)}. "
+                        f"{error.fallback_name}: "
+                        f"{describe_provider_error(error.fallback_error)}."
                     )
                 },
                 502,
@@ -3178,6 +3708,8 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
                         "datatobiz": "DataToBiz",
                         "diffusion": "Try-On Diffusion",
                         "refiner": "Try on Clothes Refiner",
+                        "vton4": "Virtual Try On 4",
+                        "clothing_tryon": "Clothing Try-On API",
                     }.get(provider, "Try on Clothes Pro")
                 )
                 message = (
@@ -3207,6 +3739,8 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
                     "datatobiz": "DataToBiz",
                     "diffusion": "Try-On Diffusion",
                     "refiner": "Try on Clothes Refiner",
+                    "vton4": "Virtual Try On 4",
+                    "clothing_tryon": "Clothing Try-On API",
                 }.get(provider, "Try on Clothes Pro")
             )
             detail = _rapidapi_http_error_detail(error)
@@ -3232,6 +3766,8 @@ class MedidasRequestHandler(BaseHTTPRequestHandler):
                     "datatobiz": "DataToBiz",
                     "diffusion": "Try-On Diffusion",
                     "refiner": "Try on Clothes Refiner",
+                    "vton4": "Virtual Try On 4",
+                    "clothing_tryon": "Clothing Try-On API",
                 }.get(provider, "Try on Clothes Pro")
             )
             self._send_json(

@@ -19,7 +19,10 @@ from web.servidor import (
     _virtual_try_on_category,
     _virtual_try_on_panel,
     _datatobiz_response_source,
+    _datatobiz_try_on_with_fallback,
     _supports_datatobiz_fallback,
+    _try_on_vton4,
+    _try_on_clothing_api,
     renderizar_pagina,
 )
 
@@ -129,6 +132,44 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(image_source[0], "result_image_data_url")
         self.assertTrue(image_source[1].startswith("data:image/jpeg;base64,"))
 
+    def test_datatobiz_server_error_falls_back_to_clothes_pro(self):
+        product = next(
+            product
+            for product in CATALOG_PRODUCTS
+            if _virtual_try_on_category(product) == "upper_body"
+        )
+        datatobiz_error = HTTPError(
+            "https://virtual-try-on2.p.rapidapi.com/clothes-virtual-tryon",
+            502,
+            "Bad Gateway",
+            {},
+            BytesIO(b'{"message":"upstream unavailable"}'),
+        )
+
+        with patch("web.servidor.RAPIDAPI_KEY", "primary-secret"), \
+                patch(
+                    "web.servidor._datatobiz_try_on",
+                    side_effect=datatobiz_error,
+                ), \
+                patch(
+                    "web.servidor._rapidapi_try_on",
+                    return_value={"result_image_url": "https://image.example/result.jpg"},
+                ) as fallback:
+            result = _datatobiz_try_on_with_fallback(
+                _jpeg_fixture(),
+                product,
+            )
+
+        self.assertEqual(
+            result["detail"],
+            "Resultado Probador (respaldo Try on Clothes Pro)",
+        )
+        self.assertEqual(
+            result["result_image_url"],
+            "https://image.example/result.jpg",
+        )
+        fallback.assert_called_once()
+
     def test_catalog_type_filter_groups_and_omits_excluded_types(self):
         page = renderizar_pagina({"view": "catalog"})
         type_filter_start = page.index(
@@ -166,6 +207,21 @@ class DeploymentTests(unittest.TestCase):
 
     def test_virtual_try_on_places_garments_beside_photo_and_selector_below(self):
         panel = _virtual_try_on_panel()
+        self.assertIn('<h2>Foto de Inicio</h2>', panel)
+        self.assertIn('id="try-on-result-title">Resultado Probador</h2>', panel)
+        self.assertIn('class="try-on-result-placeholder"', panel)
+        self.assertIn('class="try-on-recommendations-title" id="try-on-recommendations-title">Recomendaciones</h2>', panel)
+        self.assertLess(
+            panel.index('id="try-on-result-title">Resultado Probador</h2>'),
+            panel.index('data-vton-result-frame'),
+        )
+        self.assertLess(
+            panel.index('data-vton-result-frame'),
+            panel.index('class="try-on-recommendations-title" id="try-on-recommendations-title">Recomendaciones</h2>'),
+        )
+        self.assertIn('data-try-on-recommendations-outfits', panel)
+        self.assertIn('data-try-on-recommendations-previous', panel)
+        self.assertIn('data-try-on-recommendations-next', panel)
 
         self.assertLess(
             panel.index("data-vton-person-preview"),
@@ -194,6 +250,18 @@ class DeploymentTests(unittest.TestCase):
             panel.index("data-vton-result"),
             panel.index("data-vton-product-list"),
         )
+
+    def test_try_on_recommendations_show_fit_comparison_against_user_measurements(self):
+        page = renderizar_pagina({
+            "view": "try-on",
+            "waist": "72",
+            "hip": "98",
+            "preference": "regular",
+        })
+
+        self.assertIn("recommendation-fit-summary", page)
+        self.assertIn("Comparación referencial con tus medidas:", page)
+        self.assertIn("holgura", page)
 
     def test_upper_body_reference_is_cropped_from_person_photo(self):
         crop = _upper_body_reference_image(_jpeg_fixture(300, 400))
@@ -674,7 +742,7 @@ class DeploymentTests(unittest.TestCase):
 
         with patch("web.servidor.SUPABASE_URL", "https://supabase.example"), \
                 patch("web.servidor.SUPABASE_PUBLISHABLE_KEY", "publishable-key"), \
-                patch("web.servidor.RAPIDAPI_KEY", "primary-secret"), \
+                patch("web.servidor.RAPIDAPI_KEY", ""), \
                 patch(
                     "web.servidor.DATATOBIZ_RAPIDAPI_KEY",
                     "datatobiz-secret",
@@ -845,6 +913,85 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(
             headers["x-rapidapi-host"],
             "try-on-diffusion.p.rapidapi.com",
+        )
+
+    def test_virtual_try_on4_posts_person_and_garment_images(self):
+        product = next(
+            product
+            for product in CATALOG_PRODUCTS
+            if CATALOG_IMAGES_BY_URL.get(product.url)
+        )
+        result_image = _jpeg_fixture(420, 600)
+        with patch(
+            "web.servidor._download_catalog_image",
+            return_value=_jpeg_fixture(320, 420),
+        ), patch("web.servidor.RAPIDAPI_VTON4_KEY", "vton4-secret"), patch(
+            "web.servidor.urlopen",
+            return_value=_FakeResponse(
+                result_image,
+                {"Content-Type": "image/jpeg"},
+            ),
+        ) as requests:
+            result = _try_on_vton4(_jpeg_fixture(), product)
+
+        self.assertTrue(
+            result["result_image_data_url"].startswith("data:image/jpeg;base64,")
+        )
+        api_request = requests.call_args[0][0]
+        self.assertEqual(
+            api_request.full_url,
+            "https://virtual-try-on4.p.rapidapi.com/tryon",
+        )
+        self.assertIn(b'name="personImage"; filename="person.jpg"', api_request.data)
+        self.assertIn(b'name="clothImage"; filename="cloth.jpg"', api_request.data)
+        headers = {
+            key.lower(): value for key, value in api_request.header_items()
+        }
+        self.assertEqual(headers["x-rapidapi-key"], "vton4-secret")
+        self.assertEqual(
+            headers["x-rapidapi-host"], "virtual-try-on4.p.rapidapi.com"
+        )
+
+    def test_clothing_try_on_api_posts_images_and_returns_binary_result(self):
+        product = next(
+            product
+            for product in CATALOG_PRODUCTS
+            if _virtual_try_on_category(product) == "upper_body"
+            and CATALOG_IMAGES_BY_URL.get(product.url)
+        )
+        person_image = _jpeg_fixture(420, 600)
+        garment_image = _jpeg_fixture(320, 420)
+        with patch(
+            "web.servidor._download_catalog_image",
+            return_value=garment_image,
+        ), patch(
+            "web.servidor.RAPIDAPI_CLOTHING_TRYON_KEY",
+            "clothing-tryon-secret",
+        ), patch(
+            "web.servidor.urlopen",
+            return_value=_FakeResponse(
+                person_image,
+                {"Content-Type": "image/jpeg"},
+            ),
+        ) as requests:
+            result = _try_on_clothing_api(person_image, product)
+
+        self.assertTrue(
+            result["result_image_data_url"].startswith("data:image/jpeg;base64,")
+        )
+        api_request = requests.call_args[0][0]
+        self.assertEqual(
+            api_request.full_url,
+            "https://clothing-try-on-api-see-how-clothes-look-on-a-person.p.rapidapi.com/v1/try-on/clothes",
+        )
+        self.assertIn(b'name="person_image"; filename="person.jpg"', api_request.data)
+        self.assertIn(b'name="garment_image"; filename="garment.jpg"', api_request.data)
+        self.assertIn(b'name="garment_type"\r\n\r\nupper', api_request.data)
+        headers = {key.lower(): value for key, value in api_request.header_items()}
+        self.assertEqual(headers["x-rapidapi-key"], "clothing-tryon-secret")
+        self.assertEqual(
+            headers["x-rapidapi-host"],
+            "clothing-try-on-api-see-how-clothes-look-on-a-person.p.rapidapi.com",
         )
 
     def test_virtual_try_on_refines_primary_result_with_clothes_refiner(self):

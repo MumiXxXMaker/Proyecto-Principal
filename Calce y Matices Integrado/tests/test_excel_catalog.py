@@ -339,6 +339,22 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('<div class="product-name">Camisa Zara</div>', page)
         self.assertIn("no necesariamente la misma prenda", page)
 
+    def test_catalog_try_on_photo_save_state_is_shared_with_the_wizard(self):
+        app_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        shared_promise = app_script.index(
+            "let tryOnPhotoSavePromise = Promise.resolve(true);"
+        )
+        catalog_handler = app_script.index(
+            'tryOnButton.addEventListener("click", async () => {'
+        )
+        wizard_scope = app_script.index(
+            '(() => {\n  const wizard = document.getElementById("style-wizard");'
+        )
+
+        self.assertLess(shared_promise, catalog_handler)
+        self.assertLess(catalog_handler, wizard_scope)
+        self.assertEqual(app_script.count("let tryOnPhotoSavePromise"), 1)
+
     def test_page_renders_complete_sortable_and_selectable_catalog(self):
         page = renderizar_pagina(
             {
@@ -601,6 +617,7 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertIn(f'data-catalog-min-price value="{price}"', catalog_page)
         self.assertIn(f'data-catalog-max-price value="{price}"', catalog_page)
+        self.assertIn('step="1" data-catalog-min-price', catalog_page)
 
     def test_catalog_reuses_fit_recommendations_for_the_same_profile(self):
         query = {
@@ -705,13 +722,11 @@ class ExcelCatalogTests(unittest.TestCase):
             app_script,
         )
 
-    def test_catalog_search_stays_inside_catalog_tab(self):
+    def test_catalog_search_stays_outside_sticky_header(self):
         app_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn("if (searchForm && catalogViewActive)", app_script)
-        self.assertIn(
-            'catalog.querySelector(".catalog-main")?.prepend(searchForm)',
-            app_script,
-        )
+        self.assertIn('searchForm.classList.add("catalog-search-form--catalog")', app_script)
+        self.assertNotIn("stickyHeader.prepend(searchForm)", app_script)
         self.assertNotIn("catalog-search-form--nav", app_script)
         self.assertNotIn("infoLink.after(searchForm)", app_script)
 
@@ -874,6 +889,7 @@ class ExcelCatalogTests(unittest.TestCase):
         sign_in_position = page.index('data-open-account="sign-in"')
         sign_up_position = page.index('data-open-account="sign-up"')
         self.assertLess(sign_in_position, sign_up_position)
+        self.assertIn('<div class="nav-account-links">', page)
         self.assertIn(
             '<meta name="supabase-url" '
             'content="https://twhszjxhmimqlzthlbgy.supabase.co">',
@@ -887,6 +903,9 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('data-auth-mode="sign-up"', page)
         app_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         self.assertNotIn("authModeTabs.hidden = creatingAccount", app_script)
+        self.assertIn('window.addEventListener("calce:open-account"', app_script)
+        self.assertIn('window.addEventListener("calce:close-account"', app_script)
+        self.assertIn("inlineAccountFormVisible", app_script)
         self.assertIn("button.classList.toggle(\"is-active\", isActive)", app_script)
         remember_position = page.index('<label class="supabase-remember-session"')
         auth_tabs_position = page.index('<div class="supabase-auth-tabs"')
@@ -935,6 +954,20 @@ class ExcelCatalogTests(unittest.TestCase):
             'href="/?view=profile#profile-account-data" data-profile-account hidden>',
             page,
         )
+        self.assertIn(
+            'href="/?view=profile#profile-address" data-profile-address hidden>',
+            page,
+        )
+        self.assertIn(
+            '<div class="profile-tabs" role="tablist" aria-label="Secciones de Mi Perfil">',
+            page,
+        )
+        self.assertIn('data-profile-tab="account"', page)
+        self.assertIn('data-profile-tab="payment"', page)
+        self.assertIn('data-profile-tab="address">Dirección</button>', page)
+        self.assertIn('role="tabpanel"', page)
+        self.assertIn('aria-labelledby="profile-tab-account"', page)
+        self.assertIn('data-profile-tab-panel="payment" hidden>', page)
         self.assertIn('id="supabase-last-name"', page)
         self.assertIn('id="profile-phone"', page)
         self.assertIn('id="profile-avatar-input"', page)
@@ -956,7 +989,41 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertIn("data-remove-profile-avatar hidden", avatar_editor)
         self.assertIn('id="profile-payment"', page)
-        self.assertIn("La gestión de tarjetas aún no está habilitada.", page)
+        self.assertIn('id="profile-address"', page)
+        self.assertIn('data-profile-tab-panel="address" hidden', page)
+        self.assertIn('data-profile-address-form', page)
+        self.assertIn('data-profile-address-list', page)
+        for field_id in (
+            "profile-address-name",
+            "profile-address-street",
+            "profile-address-street-number",
+            "profile-address-dwelling-type",
+            "profile-address-dwelling-number",
+            "profile-address-commune",
+            "profile-address-region",
+            "profile-address-postal-code",
+        ):
+            self.assertIn(f'id="{field_id}"', page)
+        self.assertIn("Demo local, sin cargos.", page)
+        self.assertIn("data-payment-add", page)
+        self.assertIn("Añadir nueva tarjeta", page)
+        self.assertIn("data-payment-method-list", page)
+        self.assertIn("data-payment-form", page)
+        self.assertIn('id="payment-card-number"', page)
+        self.assertIn('maxlength="19"', page)
+        self.assertIn(
+            'pattern="[0-9]{4} [0-9]{4} [0-9]{4} [0-9]{4}"',
+            page,
+        )
+        self.assertIn('id="payment-card-expiration"', page)
+        self.assertIn('placeholder="MM/AA"', page)
+        self.assertIn('id="payment-card-cvv"', page)
+        self.assertIn('placeholder="CVV"', page)
+        self.assertIn('pattern="[0-9]{3}" maxlength="3"', page)
+        self.assertIn('id="payment-cardholder-name"', page)
+        self.assertIn("data-payment-detected-brand", page)
+        self.assertNotIn('autocomplete="cc-number"', page)
+        self.assertNotIn('autocomplete="cc-csc"', page)
         self.assertIn('data-supabase-sign-out hidden>Cerrar sesión</button>', page)
         self.assertIn('data-profile-email', page)
         app_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
@@ -968,6 +1035,24 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("storage: authStorage", app_script)
         self.assertIn("window.localStorage", app_script)
         self.assertIn("window.sessionStorage", app_script)
+        self.assertIn("calce-payment-methods:${userId}", app_script)
+        self.assertIn("isDefault: methods.length === 0", app_script)
+        self.assertIn("Seleccionar como predeterminada", app_script)
+        self.assertIn("formatPaymentCardNumberInput", app_script)
+        self.assertIn("formatPaymentExpirationInput", app_script)
+        self.assertIn("detectPaymentBrand", app_script)
+        self.assertIn("lastFour: cardNumber.slice(-4)", app_script)
+        payment_submit = app_script.split(
+            'paymentForm?.addEventListener("submit", event => {', 1
+        )[1].split("paymentMethodsList?.addEventListener", 1)[0]
+        saved_method = payment_submit.split("methods.push({", 1)[1].split("});", 1)[0]
+        self.assertIn("cardholderName,", saved_method)
+        self.assertNotIn("cardNumber,", saved_method)
+        self.assertNotIn("paymentCvvInput", saved_method)
+        self.assertNotIn("paymentExpirationInput", saved_method)
+        self.assertIn("const activateProfileTab =", app_script)
+        self.assertIn('window.location.hash === `#profile-${name}`', app_script)
+        self.assertIn('event.key === "ArrowRight"', app_script)
         self.assertIn(
             'if (!window.confirm("¿Quieres quitar tu foto de perfil?")) return;',
             app_script,
@@ -979,6 +1064,9 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('return_view=${authReturnView}', app_script)
         self.assertIn("profileAvatarPath(user)", app_script)
         self.assertIn('from("user_profiles")', app_script)
+        self.assertIn('from("user_addresses")', app_script)
+        self.assertIn("loadSavedAddresses", app_script)
+        self.assertIn("data-profile-address-action", app_script)
         self.assertIn("new URLSearchParams(window.location.search).get(\"auth_mode\")", app_script)
         measured_page = renderizar_pagina(
             {"bust": "90", "waist": "74", "hip": "100"}
@@ -992,6 +1080,7 @@ class ExcelCatalogTests(unittest.TestCase):
             measured_page,
         )
         account_page = renderizar_pagina({"view": "account", "auth_mode": "sign-up"})
+        self.assertIn('<div class="nav-account-links" hidden>', account_page)
         self.assertIn(
             'data-open-account="sign-up" aria-current="page">Crear cuenta</a>',
             account_page,
@@ -1015,6 +1104,7 @@ class ExcelCatalogTests(unittest.TestCase):
         sign_in_page = renderizar_pagina(
             {"view": "account", "auth_mode": "sign-in"}
         )
+        self.assertIn('<div class="nav-account-links" hidden>', sign_in_page)
         self.assertIn('<h1 class="brandmark supabase-auth-logo"', sign_in_page)
         self.assertIn(
             '<a class="account-home-button" href="/?view=storefront&amp;auth_mode=sign-in"',
@@ -1024,6 +1114,12 @@ class ExcelCatalogTests(unittest.TestCase):
 
         self.assertIn("Recordar medidas", page)
         self.assertIn("alter table public.user_profiles enable row level security", schema)
+        self.assertIn("alter table public.user_addresses enable row level security", schema)
+        self.assertIn("Users can read their own shipping addresses", schema)
+        self.assertIn("Users can insert their own shipping addresses", schema)
+        self.assertIn("Users can update their own shipping addresses", schema)
+        self.assertIn("Users can delete their own shipping addresses", schema)
+        self.assertIn("grant select, insert, update, delete on public.user_addresses to authenticated", schema)
         self.assertIn("(select auth.uid()) = user_id", schema)
         self.assertIn("remember_measurements boolean not null default false", schema)
         self.assertIn("remember_photo boolean not null default false", schema)
@@ -1060,6 +1156,8 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('<option value="automatic">Automático</option>', try_on_page)
         self.assertIn('value="diffusion"', try_on_page)
         self.assertIn('value="refiner"', try_on_page)
+        self.assertIn('value="vton4"', try_on_page)
+        self.assertIn('value="clothing_tryon">Clothing Try-On API</option>', try_on_page)
         self.assertIn("data-vton-gender", try_on_page)
         self.assertIn('<option value="woman" selected>Mujer</option>', try_on_page)
         self.assertIn("data-vton-generate", try_on_page)
@@ -1099,6 +1197,13 @@ class ExcelCatalogTests(unittest.TestCase):
         )
         self.assertIn('data-vton-payment-yes>Sí</button>', try_on_page)
         self.assertIn('data-vton-payment-no>No</button>', try_on_page)
+        self.assertIn("gap: 3mm;", styles)
+        self.assertIn(
+            ".try-on-payment-choice-actions .matices-button {\n"
+            "  display: inline-flex;\n"
+            "  flex: 1 1 0;",
+            styles,
+        )
         self.assertNotIn("data-vton-cart-choice-tooltip", try_on_page)
         self.assertNotIn("try-on-cart-checkbox", app_script)
         self.assertIn("updateTryOnCartTotal", app_script)
@@ -1205,6 +1310,21 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn('aria-label="Acceso a tu cuenta">', account_page)
         self.assertNotIn('aria-label="Acceso a tu cuenta" hidden', account_page)
 
+    def test_try_on_restores_the_session_photo_before_enabling_generation(self):
+        app_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        initializer_start = app_script.index("const initializeTryOnPage = () =>")
+        initializer_end = app_script.index(
+            'window.addEventListener("calce:protected-page-visible"',
+            initializer_start,
+        )
+        initializer = app_script[initializer_start:initializer_end]
+
+        self.assertIn("loadTryOnPhotoForSession()", initializer)
+        self.assertIn("selectedPhoto = savedPhoto.blob", initializer)
+        self.assertIn("savedPhoto.expiresAt > Date.now()", initializer)
+        self.assertIn("syncTryOnPhoto()", initializer)
+        self.assertIn("await tryOnPhotoSavePromise", app_script)
+
     def test_render_blueprint_is_public_and_free(self):
         render_config = (ROOT.parent / "render.yaml").read_text(encoding="utf-8")
         self.assertIn("plan: free", render_config)
@@ -1248,6 +1368,48 @@ class ExcelCatalogTests(unittest.TestCase):
             partial_measurements["cards"],
         )
 
+    def test_catalog_without_fit_measurements_offers_inline_form(self):
+        catalog_page = renderizar_pagina(
+            {"view": "catalog", "preference": "loose"}
+        )
+
+        self.assertIn(
+            'class="catalog-measurement-prompt"',
+            catalog_page,
+        )
+        self.assertIn(
+            'data-catalog-measurement-form aria-label="Ingresa cintura y cadera"',
+            catalog_page,
+        )
+        self.assertIn('name="view" value="catalog"', catalog_page)
+        self.assertIn('name="preference" value="loose"', catalog_page)
+        self.assertIn('name="waist"', catalog_page)
+        self.assertIn('name="hip"', catalog_page)
+        self.assertIn(
+            "Para estimar cómo te queda cada prenda, necesitamos tus medidas de cintura y cadera.",
+            catalog_page,
+        )
+
+        partial_page = renderizar_pagina(
+            {"view": "catalog", "waist": "70"}
+        )
+        self.assertIn(
+            "Para estimar cómo te queda cada prenda, completa también la medida de cadera.",
+            partial_page,
+        )
+        self.assertIn(
+            'id="catalog-measurement-waist" name="waist" type="number" '
+            'min="40" max="180" step="0.5" placeholder="p. ej. 74" '
+            'value="70" required',
+            partial_page,
+        )
+        self.assertNotIn(
+            'class="catalog-measurement-prompt"',
+            renderizar_pagina(
+                {"view": "catalog", "waist": "70", "hip": "96"}
+            ),
+        )
+
     def test_catalog_cards_keep_fit_details_without_comparison_data(self):
         product = next(item for item in WOMENSWEAR_DATA["products"] if item["store"] == "Paris")
         search_result = _catalog_page_data({"search": product["title"]})
@@ -1269,6 +1431,7 @@ class ExcelCatalogTests(unittest.TestCase):
         home_page = renderizar_pagina({"view": "home"})
         catalog_page = renderizar_pagina({"view": "catalog"})
         cart_page = renderizar_pagina({"view": "cart"})
+        checkout_page = renderizar_pagina({"view": "checkout"})
         try_on_page = renderizar_pagina({"view": "try-on"})
         info_page = renderizar_pagina({"view": "info"})
 
@@ -1296,12 +1459,50 @@ class ExcelCatalogTests(unittest.TestCase):
             '<span class="eyebrow">Calce · estilo personal</span>',
             storefront_page,
         )
-        self.assertIn("Productos destacados", storefront_page)
-        self.assertIn('data-page-panel="storefront"', storefront_page)
         self.assertIn(
-            '<a class="matices-button" href="/?view=home">Tu Calce</a>',
+            '<h2 id="storefront-how-to-title">¿Qué es “Tu Calce” y cómo se usa?</h2>',
             storefront_page,
         )
+        how_to = storefront_page.split(
+            '<section class="storefront-how-to"', 1
+        )[1].split("</section>", 1)[0]
+        hero = storefront_page.split(
+            '<section class="storefront-hero"', 1
+        )[1].split("</section>", 1)[0]
+        calce_button = (
+            '<a class="matices-button matices-button-primary" '
+            'href="/?view=home">Tu Calce</a>'
+        )
+        self.assertNotIn(calce_button, hero)
+        self.assertIn("Tu Calce es una guía personal", how_to)
+        self.assertEqual(how_to.count("<li>"), 5)
+        self.assertLess(how_to.rindex("</ol>"), how_to.index(calce_button))
+        self.assertLess(
+            storefront_page.index('<section class="storefront-how-to"'),
+            storefront_page.index('<section class="storefront-promise"'),
+        )
+        self.assertIn("Productos destacados", storefront_page)
+        outfit_section = storefront_page.split(
+            '<section class="storefront-section storefront-outfit-section"', 1
+        )[1].split("</section>", 1)[0]
+        self.assertIn("Recomendaciones de conjuntos", outfit_section)
+        self.assertIn("no en colores o estilos", outfit_section)
+        self.assertEqual(
+            len(re.findall(r'<article class="storefront-outfit">', outfit_section)),
+            3,
+        )
+        outfit_product_urls = re.findall(
+            r'<a class="storefront-outfit-piece"\s+href="([^"]+)"',
+            outfit_section,
+        )
+        self.assertEqual(len(outfit_product_urls), 6)
+        self.assertTrue(
+            all(
+                product_url in {product.url for product in CATALOG_PRODUCTS}
+                for product_url in outfit_product_urls
+            )
+        )
+        self.assertIn('data-page-panel="storefront"', storefront_page)
         self.assertNotIn("Conocer mi calce", storefront_page)
         self.assertIn('data-page-panel="storefront" hidden', home_page)
         self.assertIn("Cómo comparamos las prendas", info_page)
@@ -1320,11 +1521,82 @@ class ExcelCatalogTests(unittest.TestCase):
             'href="/?view=catalog&amp;preference=regular" aria-current="page">Catálogo</a>',
             catalog_page,
         )
+        sticky_header_start = catalog_page.index('data-catalog-sticky-header')
+        sticky_header_end = catalog_page.index(
+            '<div class="catalog-view-bar"', sticky_header_start
+        )
+        sticky_header = catalog_page[sticky_header_start:sticky_header_end]
+        for control in (
+            "data-catalog-open-filters",
+            "data-catalog-sort",
+        ):
+            self.assertIn(control, sticky_header)
+        for control in (
+            "data-catalog-heading",
+            "data-catalog-result-count",
+            "catalog-view-bar",
+            "data-catalog-search-form",
+            "data-catalog-selection-bar",
+            "data-catalog-try-on",
+        ):
+            self.assertNotIn(control, sticky_header)
+        self.assertGreater(
+            catalog_page.index('data-catalog-search-form'), sticky_header_end
+        )
+        self.assertGreater(
+            catalog_page.index('data-catalog-selection-bar'), sticky_header_end
+        )
         self.assertIn('href="/?view=cart" aria-current="page"', cart_page)
         self.assertIn('id="cart-panel" data-page-panel="cart"', cart_page)
-        self.assertIn("data-cart-confirm>Confirmar selección</button>", cart_page)
-        self.assertIn("ni procesa pagos", cart_page)
-        self.assertNotIn('role="tablist"', home_page)
+        self.assertIn(
+            'href="/?view=checkout" data-cart-checkout>Confirmar Pago</a>',
+            cart_page,
+        )
+        self.assertIn("ni se procesan pagos", cart_page)
+        self.assertNotIn("data-cart-confirmation", cart_page)
+        self.assertIn(
+            '<section id="checkout-panel" data-page-panel="checkout">',
+            checkout_page,
+        )
+        self.assertIn('data-page-panel="cart" hidden', checkout_page)
+        for field_id in (
+            "checkout-street",
+            "checkout-street-number",
+            "checkout-dwelling-type",
+            "checkout-dwelling-number",
+            "checkout-commune",
+            "checkout-region",
+            "checkout-postal-code",
+        ):
+            self.assertIn(f'id="{field_id}"', checkout_page)
+        self.assertIn('data-checkout-payment-select required', checkout_page)
+        self.assertIn(
+            'data-checkout-payment-add disabled>Añadir tarjeta</button>',
+            checkout_page,
+        )
+        self.assertGreater(
+            checkout_page.index('<dialog class="profile-payment-dialog"'),
+            checkout_page.index("</main>"),
+        )
+        self.assertIn('data-payment-form autocomplete="off"', checkout_page)
+        self.assertIn("no se envían ni se guardan", checkout_page)
+        self.assertIn('data-checkout-address-select', checkout_page)
+        self.assertIn('data-checkout-address-manage', checkout_page)
+        self.assertIn('data-checkout-form', checkout_page)
+        self.assertIn("return_view=checkout", checkout_page)
+        checkout_script = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("renderCheckoutPaymentMethods", checkout_script)
+        self.assertIn(
+            'checkoutAddPaymentButton?.addEventListener("click"',
+            checkout_script,
+        )
+        self.assertIn("openPaymentDialog(true);", checkout_script)
+        self.assertIn('openedFromCheckout ? paymentMethodId : ""', checkout_script)
+        self.assertIn('checkoutForm?.addEventListener("submit"', checkout_script)
+        home_navigation = home_page.split(
+            '<nav class="page-tabs"', 1
+        )[1].split("</nav>", 1)[0]
+        self.assertNotIn('role="tablist"', home_navigation)
         self.assertNotIn('data-page-tab-link', home_page)
         self.assertIn('data-page-panel="catalog"', home_page)
         self.assertIn('data-page-panel="home"', catalog_page)
@@ -1467,6 +1739,34 @@ class ExcelCatalogTests(unittest.TestCase):
         self.assertIn("Referencia estimada:", store_section)
         self.assertIn("Ver medidas comparadas", store_section)
         self.assertNotIn('class="size-chart"', page)
+
+    def test_storefront_uses_white_reference_image_without_changing_catalog_photo(self):
+        storefront = servidor._storefront_content()
+        target_url = "https://www.paris.cl/vestido-kathy-mesh-147860.html"
+        original_image_url = servidor.CATALOG_IMAGES_BY_URL[target_url]
+        white_image_url = servidor.STOREFRONT_IMAGE_OVERRIDES[target_url]
+        hero_visual = storefront.split(
+            '<div class="storefront-hero-visual">', 1
+        )[1].split("</div>", 1)[0]
+        image_links = re.findall(
+            r'<a class="(?:storefront-product-image|storefront-hero-visual)"'
+            r'[^>]*>.*?</a>',
+            storefront,
+            flags=re.DOTALL,
+        )
+        target_image_links = [
+            link for link in image_links if target_url in link
+        ]
+
+        self.assertIn(white_image_url, hero_visual)
+        self.assertNotIn(target_url, hero_visual)
+        self.assertNotIn("<a ", hero_visual)
+        self.assertNotIn("image-source", hero_visual)
+        self.assertTrue(target_image_links)
+        self.assertTrue(all(white_image_url in link for link in target_image_links))
+        self.assertTrue(all(original_image_url not in link for link in target_image_links))
+        self.assertIn("Imagen referencial · vestido blanco", storefront)
+        self.assertEqual(original_image_url, servidor.CATALOG_IMAGES_BY_URL[target_url])
 
     def test_home_store_recommendations_respect_selected_garment_category(self):
         page = renderizar_pagina(
